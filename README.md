@@ -1,98 +1,87 @@
-# 📈 AI Chunsik (AI 춘식) MK1.5
+# 🚀 AI Chunsik MK1.5: Dual-Track Autonomous Quant Agent
 
-![AI Chunsik Header](assets/header.png)
+**AI 춘식 MK1.5**는 시장의 '숫자(재무)'와 '목소리(SNS)'를 동시에 분석하는 하이브리드 인공지능 투자 에이전트입니다. 단순히 차트를 읽는 것을 넘어, 거시적 섹터 순환매부터 커뮤니티의 폭발적인 모멘텀까지 포착하여 최적의 스윙 타점을 제안합니다.
 
-> **Wave Energy Theory 기반 미국 주식 자동 분석 및 텔레그램 리포팅 에이전트**
-
-[![Python Version](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ollama](https://img.shields.io/badge/LLM-Ollama-orange.svg)](https://ollama.ai/)
-
-AI 춘식이는 **파동에너지 이론(Wave Energy Theory)**을 바탕으로 미국 주식 시장을 탑다운(Top-down) 방식으로 분석합니다. 로컬 LLM(Ollama)을 활용하여 정교한 투자 전략 리포트를 생성한 뒤, 텔레그램으로 자동 전송해주는 스마트한 퀀트 투자 보조 에이전트입니다.
+![Python](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python)
+![Framework](https://img.shields.io/badge/Framework-Asyncio-orange?style=for-the-badge)
+![LLM](https://img.shields.io/badge/AI-Gemma_4-red?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 ---
 
-## 📺 작동 메커니즘 (Analysis Pipeline)
+## 💡 System Architecture: The Dual-Track Pipeline
 
-```mermaid
-graph TD
-    A[시장 시간 감지] --> B{장 운영 중?}
-    B -- Yes --> C[탑다운 섹터 스캔]
-    C --> D[파동에너지/스토캐스틱 분석]
-    D --> E[종목 최종 선별]
-    E --> F[로컬 AI 내러티브 생성]
-    F --> G[텔레그램 리포트 전송]
-    B -- No --> H[대기 및 스케줄링]
-```
+본 시스템은 두 개의 독립적인 분석 트랙을 비동기(Asynchronous)로 병렬 실행하여 시장의 모든 기회를 놓치지 않습니다.
 
----
+### 🌲 Track A: Fundamental Strength (The Forest)
+*   **Sector Rotation**: 11대 SPDR 섹터 ETF의 자금 흐름을 추적하여 현재 시장을 주도하는 섹터를 우선 선별합니다.
+*   **Quantitative Filtering**: Finviz 및 Yahoo Finance 데이터를 활용하여 시가총액, 부채비율, 기관 보유 지분, FCF(잉여현금흐름) 등 엄격한 재무 기준을 통과한 우량주만 추출합니다.
 
-## 🚀 주요 기능
-
-- **시장 지수 스캔**: NYSE 운영 달력을 연동하여 개장/마감 시점 및 휴장일 자동 감지.
-- **탑다운 섹터 분석**: 자금 유입이 강한 주도 섹터 및 종목 실시간 스크리닝.
-- **파동에너지 분석**: 스토캐스틱 기반의 단/중/장기 파동 정배열 및 폭발 타점 포착.
-- **AI 내러티브 생성**: 로컬 AI(Ollama)를 활용하여 팩트 기반의 투자 전략 리포트 작성.
-- **텔레그램 알림**: 분석 결과를 모바일로 즉시 전송하여 빠른 의사결정 지원.
-- **지능형 스케줄러**: 서머타임 및 미국 시장 휴장일(Early Close 포함) 완벽 대응.
+### 🚀 Track B: Social Momentum (The Crowd)
+*   **3-Tier Social Scanner**: StockTwits API 및 Reddit(`r/wallstreetbets`)의 실시간 데이터를 스캔하여 대중의 관심이 집중되는 핫티커를 포착합니다.
+*   **Anti-Noise Engine**: 단순 대화 단어를 티커로 오인하지 않도록 정교한 Regex 필터와 블랙리스트 엔진이 탑재되어 있습니다.
+*   **Fault-Tolerant Fallback**: API 차단 시 자동으로 스크래핑 및 로컬 핵심 풀로 전환되는 무중단 아키텍처를 가집니다.
 
 ---
 
-## 🛠 설치 및 설정
+## ⚙️ Core Modules
 
-### 1. 필수 요구사항
-- **Python 3.9+**
-- **[Ollama](https://ollama.ai/)**: 로컬 LLM 실행을 위해 설치가 필요합니다. (`gemma2:9b` 모델 권장)
-- **Telegram Bot**: 봇 토큰과 채팅 ID가 필요합니다.
+1.  **Technical Engine (Wave Energy)**: 
+    - 스토캐스틱 대/중/소 파동에너지 지표를 결합하여 추세의 정점과 바닥을 판별합니다.
+    - 평균 거래량 대비 1.2배 이상의 거래량 동반 여부를 필수 조건으로 체크합니다.
+2.  **AI Verification (Gemma 4)**: 
+    - 로컬 Ollama 환경의 **Gemma 4:26b** 모델을 사용하여 기술적 분석 결과와 최신 뉴스를 결합, 최종 투자 적합성을 심층 검증합니다.
+3.  **Autonomous Reporter**:
+    - 매일의 분석 결과를 Markdown 리포트로 생성하고, 핵심 요약본을 텔레그램으로 즉시 전송합니다.
 
-### 2. 라이브러리 설치
+---
+
+## 🛠 Installation & Setup
+
+### Prerequisites
+*   Python 3.9+
+*   [Ollama](https://ollama.ai/) (Gemma 4 모델 설치 필요)
+*   Telegram Bot Token (알림 수신용)
+
+### Setup
 ```bash
-git clone https://github.com/casareborgia/AI-CHOONSIK-STOCK-AGENT-.git
-cd AI-CHOONSIK-STOCK-AGENT-
+# 1. 레파지토리 클론
+git clone https://github.com/your-repo/ai-choonsik-mk1.5.git
+cd ai-choonsik-mk1.5
+
+# 2. 필수 라이브러리 설치
 pip install -r requirements.txt
+
+# 3. 환경 설정
+# config.py 파일에서 TELEGRAM_BOT_TOKEN 및 API 설정
 ```
 
-### 3. 환경 설정
-설정 파일 예시를 복사하여 본인의 정보를 입력하십시오.
+### Usage
 ```bash
-cp config.py.example config.py
-```
-`config.py` 파일 내의 다음 항목을 수정하십시오:
-- `TELEGRAM_BOT_TOKEN`: 텔레그램 봇 토큰
-- `TELEGRAM_CHAT_ID`: 리포트를 받을 채팅 ID
-
----
-
-## 🏃 실행 방법
-
-### 단발성 분석 실행
-현재 시점의 시장을 분석하고 리포트를 즉시 생성합니다.
-```bash
+# 전체 파이프라인 수동 실행
 python main_agent.py
-```
 
-### 자동 스케줄러 실행 (권장)
-미국 시장 시간(개장/마감)에 맞춰 자동으로 분석을 수행합니다.
-```bash
+# 시장 시간에 맞춘 자동 스케줄러 가동
 python auto_runner.py
 ```
 
 ---
 
-## 📂 프로젝트 구조
-- `main_agent.py`: 분석 파이프라인 총괄 엔진
-- `auto_runner.py`: 시장 시간 기반 지능형 스케줄러
-- `reporter.py`: 리포트 생성 및 텔레그램 전송 모듈
-- `core/`: 섹터 스캔, 기술적 분석 등 핵심 로직
-- `plugins/`: SNS 스캐너 등 추가 확장 모듈
-- `reports/`: 생성된 마크다운 리포트 저장 폴더
+## 📊 Sample Output
+분석이 완료되면 다음과 같은 형태의 인사이트가 도출됩니다:
+
+> **[Track B 포착] NVDA (NVIDIA Corporation)**
+> - **SNS Mentions**: 150+ (Top 1 in Reddit)
+> - **Technical**: 파동에너지 상방 정렬 (Strong Buy Signal)
+> - **AI Opinion**: "반도체 주도 섹터의 수급과 소셜 모멘텀이 일치함. 단기 과열 주의하나 추세 지속 가능성 높음."
 
 ---
 
-## ⚠️ 주의사항 (Disclaimer)
-본 프로그램은 알고리즘 및 기술적 분석에 기반한 **참고용 자료**를 제공할 뿐이며, 어떠한 투자 결과도 보장하지 않습니다. 모든 투자의 책임은 투자자 본인에게 있으며, 실제 거래 시 충분한 검토 후 진행하시기 바랍니다.
+## ⚠️ Disclaimer
+본 프로젝트는 학습 및 정보 제공을 목적으로 개발된 오픈소스 에이전트입니다. 모든 투자에 대한 최종 결정과 책임은 투자자 본인에게 있으며, AI의 분석 결과가 수익을 보장하지 않습니다.
 
 ---
 
-**Author**: [casareborgia](https://github.com/casareborgia)  
-**License**: MIT
+### 📬 Contact & Contribution
+- **Maintainer**: AI 춘식 개발팀
+- 기여하고 싶은 내용이 있다면 Issue 또는 Pull Request를 남겨주세요!
