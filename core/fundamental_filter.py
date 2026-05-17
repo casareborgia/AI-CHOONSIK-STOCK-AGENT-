@@ -58,7 +58,7 @@ def run_finviz_screener(target_sectors=None):
         return fallback_tickers
 
 
-def verify_with_yahoo(tickers, target_sectors=None):
+def verify_with_yahoo(tickers, target_sectors=None, config_preset=None):
     """
     추출된 티커를 대상으로 Yahoo Finance 정밀 재무제표 및 주도 섹터 부합 여부를 교차 검증합니다.
     """
@@ -107,12 +107,22 @@ def verify_with_yahoo(tickers, target_sectors=None):
                     # 주도 섹터와 불일치하는 종목은 탈락 (Drop)
                     continue
                     
+            # 동적 필터 셋업 (preset이 있으면 우선 적용, 없으면 기본 config 적용)
+            min_inst_own = config.MIN_INST_OWNERSHIP
+            require_fcf = config.REQUIRE_FCF_POSITIVE
+            max_debt = config.MAX_DEBT_RATIO
+            
+            if config_preset and 'filters' in config_preset:
+                min_inst_own = config_preset['filters'].get('Institutional Ownership', min_inst_own)
+                require_fcf = config_preset['filters'].get('REQUIRE_FCF_POSITIVE', require_fcf)
+                max_debt = config_preset['filters'].get('MAX_DEBT_RATIO', max_debt)
+
             # 1. 기관 보유 지분율 검증 (heldPercentInstitutions)
             inst_own = info.get('heldPercentInstitutions', 0)
             if inst_own is None:
                 inst_own = 0.0
                 
-            if inst_own < config.MIN_INST_OWNERSHIP:
+            if inst_own < min_inst_own:
                 continue
                 
             # 2. 잉여현금흐름 (Free Cash Flow) 흑자 검증
@@ -120,14 +130,14 @@ def verify_with_yahoo(tickers, target_sectors=None):
             if fcf is None:
                 fcf = 0
                 
-            if config.REQUIRE_FCF_POSITIVE and fcf <= 0:
+            if require_fcf and fcf <= 0:
                 continue
                 
             # 3. 부채비율 교차 검증 (debtToEquity)
             de_ratio = info.get('debtToEquity', 0)
-            if de_ratio is not None and hasattr(config, 'MAX_DEBT_RATIO'):
+            if de_ratio is not None and max_debt is not None:
                 normalized_de = de_ratio / 100.0 if de_ratio > 10 else de_ratio
-                if normalized_de > config.MAX_DEBT_RATIO:
+                if normalized_de > max_debt:
                     continue
                     
             # 4. 부가 정보 및 밸류에이션 지표 추출 (클로드 지적사항 완벽 반영)
@@ -153,6 +163,10 @@ def verify_with_yahoo(tickers, target_sectors=None):
             if low_52w is None:
                 low_52w = 0.0
                 
+            beta_val = info.get('beta', 1.0)
+            if beta_val is None:
+                beta_val = 1.0
+                
             # 표기용 섹터명 동적 생성 (내적 모순 해소)
             disp_sector = yahoo_sector
             if yahoo_sector != normalized_sec:
@@ -170,7 +184,8 @@ def verify_with_yahoo(tickers, target_sectors=None):
                 'peg': peg_ratio,
                 'ev_ebitda': ev_ebitda,
                 'high_52w': high_52w,
-                'low_52w': low_52w
+                'low_52w': low_52w,
+                'beta': beta_val
             })
             
         except Exception as e:
@@ -195,6 +210,41 @@ def get_fundamental_candidates(target_sectors=None):
         print(f"[{c['ticker']}] {c['name']} | 기관지분: {c['inst_own']:.1f}% | FCF: ${c['fcf']:,} | 섹터: {c['sector']}")
         
     return verified_candidates
+
+
+def get_track_c_candidates(target_sectors=None):
+    """
+    [Track C] 기관 스마트 머니 와치리스트 기반 필터링
+    """
+    preset = config.TRACK_C_PRESETS
+    raw_tickers = preset.get('watchlist', [])
+    print(f"\n🏛️ [Track C 가동] 대형 기관 우량주 와치리스트 스캔 ({len(raw_tickers)}개)")
+    
+    verified = verify_with_yahoo(raw_tickers, target_sectors=target_sectors, config_preset=preset)
+    
+    for c in verified:
+        c['track'] = 'Track C'
+        # 기술적 엔진에서 사용할 볼륨 멀티플라이어 오버라이드
+        c['vol_multiplier'] = preset['filters'].get('vol_multiplier', config.VOL_MULTIPLIER)
+        
+    return verified[:preset.get('max_candidates', 5)]
+
+
+def get_track_d_candidates(target_sectors=None):
+    """
+    [Track D] 실리콘밸리 VC 와치리스트 기반 필터링
+    """
+    preset = config.TRACK_D_PRESETS
+    raw_tickers = preset.get('watchlist', [])
+    print(f"\n🚀 [Track D 가동] 거물 VC 주도 테크주 와치리스트 스캔 ({len(raw_tickers)}개)")
+    
+    verified = verify_with_yahoo(raw_tickers, target_sectors=target_sectors, config_preset=preset)
+    
+    for c in verified:
+        c['track'] = 'Track D'
+        c['vol_multiplier'] = preset['filters'].get('vol_multiplier_boost', config.VOL_MULTIPLIER)
+        
+    return verified[:preset.get('max_candidates', 3)]
 
 
 # 모듈 단독 테스트용 코드

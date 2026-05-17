@@ -5,6 +5,29 @@
 # 전략 수정 시 소스 코드가 아닌 본 파일의 수치만 조정하십시오.
 
 import os
+import json
+
+# ------------------------------------------------------------------------------
+# [공통 데이터 관리] 동적 와치리스트 로더 세팅
+# ------------------------------------------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+GURUS_WATCHLIST_PATH = os.path.join(BASE_DIR, "watchlist_gurus.json")
+VC_WATCHLIST_PATH = os.path.join(BASE_DIR, "watchlist_vc.json")
+
+def load_json_watchlist(file_path, default_list):
+    """지정된 경로에서 와치리스트를 로드하며, 파일이 없을 경우 기본값으로 자동 생성합니다."""
+    if not os.path.exists(file_path):
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(default_list, f, indent=4)
+            return default_list
+        except Exception:
+            return default_list
+    try:
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return default_list
 
 # ------------------------------------------------------------------------------
 # 1. 시장 지수 및 탑다운 섹터 순환매 설정 (Market Indices & Sector Rotation)
@@ -64,6 +87,53 @@ SNS_PRESETS = {
     'vol_multiplier': 1.5,              # 스팸 펌핑 차단을 위해 평균 대비 1.5배 이상 거래량 요구
     'target_subreddits': ['wallstreetbets', 'stocks', 'shortsqueeze'],
     'max_candidates': 5                 # 최종 검증을 수행할 상위 종목 개수
+}
+
+
+# ------------------------------------------------------------------------------
+# 2-C. 트랙 C: 대형 기관 및 헤지펀드 스마트 머니 (Track C - Institutional Gurus)
+# ------------------------------------------------------------------------------
+GURUS_DEFAULT = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA'] # 초기 폴백 리스트
+
+TRACK_C_PRESETS = {
+    'watchlist': load_json_watchlist(GURUS_WATCHLIST_PATH, GURUS_DEFAULT),
+    'target_ciks': {
+        'Berkshire Hathaway': '0001067983',
+        'Scion Asset Management': '0001649339',
+        'Pershing Square': '0001336528',
+        'Citadel Advisors': '0001423053'
+    },
+    'filters': {
+        'Market Cap.': '+Mid (over $2bln)',
+        'Institutional Ownership': 0.30,         # 30% 이상
+        'REQUIRE_FCF_POSITIVE': True,            # FCF 흑자 필수
+        'MAX_DEBT_RATIO': 1.5,                   # 부채비율 150% 제한
+        'vol_multiplier': 1.5
+    },
+    'max_candidates': 5
+}
+
+
+# ------------------------------------------------------------------------------
+# 2-D. 트랙 D: 실리콘밸리 거물 VC 주도주 (Track D - Venture Capital Whales)
+# ------------------------------------------------------------------------------
+VC_DEFAULT = ['PLTR', 'ABNB', 'ASAN', 'AFRM', 'SNOW', 'COIN', 'ROKU', 'ANET', 'U', 'APP']
+
+TRACK_D_PRESETS = {
+    'watchlist': load_json_watchlist(VC_WATCHLIST_PATH, VC_DEFAULT),
+    'target_ciks': {
+        'Founders Fund': '0001438722',
+        'Sequoia Capital': '0001393649',
+        'Andreesen Horowitz': '0001475283'
+    },
+    'filters': {
+        'Market Cap.': '+Mid (over $2bln)',
+        'Institutional Ownership': 0.15,          # 15% 이상 완화
+        'REQUIRE_FCF_POSITIVE': False,            # 적자 허용
+        'MAX_DEBT_RATIO': 2.5,                    # 부채비율 250% 허용
+        'vol_multiplier_boost': 1.8               # 1.8배 거래량 요구
+    },
+    'max_candidates': 3
 }
 
 

@@ -11,7 +11,8 @@ import sys
 import os
 from datetime import datetime
 
-# 설정 및 엔진 임포트
+# 부모 디렉토리 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import config
 from core.technical_engine import analyze_technical_signals
 
@@ -91,17 +92,41 @@ def generate_markdown_report(leading_sectors, candidates):
 ## 🎯 3. 정밀 타점 포착 핵심 후보군 (총 {len(strong_buys)}개)
 - **Track A (펀더멘털 스윙 트랙)**: {len([c for c in strong_buys if c.get('track', 'Track A') == 'Track A'])}개 포착
 - **Track B (SNS 모멘텀 급등 트랙)**: {len([c for c in strong_buys if c.get('track') == 'Track B'])}개 포착
+- **Track C (기관 스마트머니 트랙)**: {len([c for c in strong_buys if c.get('track') == 'Track C'])}개 포착
+- **Track D (테크 VC 성장주 트랙)**: {len([c for c in strong_buys if c.get('track') == 'Track D'])}개 포착
 
 """
     
+    # [정합성 보완] 섹터 쏠림도 진단 모듈 가동
+    sector_counts = {}
+    for c in strong_buys:
+        sec = c.get('sector', 'Unknown')
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+        
+    overconcentrated_sectors = {sec: count for sec, count in sector_counts.items() if count >= 3}
+    if overconcentrated_sectors:
+        md_content += "> [!WARNING]\n"
+        md_content += "> **⚠️ 포트폴리오 섹터 집중 리스크 경고**\n"
+        for sec, count in overconcentrated_sectors.items():
+            md_content += f"> 오늘 포착된 {len(strong_buys)}개 종목 중 무려 **{count}개**가 **[{sec}]** 섹터에 쏠려 있습니다.\n"
+        md_content += "> 특정 섹터 올인은 국제유가, 규제 정책 등 거시적 매크로 변수에 포트폴리오 전체가 동시 노출되는 대단히 취약한 구조를 야기합니다. 리스크의 기계적 분산을 위해 타 섹터(예: Technology, Materials 등)의 우량 대안군을 믹스하거나, 동일 섹터 내 투입 비중을 철저히 낮춰 대응하는 분산 자산 배분 전략을 강력히 권장합니다.\n\n"
+
     if not strong_buys:
         md_content += "오늘 시장에서는 거래량 급증을 동반한 완벽한 찐폭발/매수 타점 종목이 포착되지 않았습니다. 현금 비중 유지를 권장합니다.\n"
     else:
+        # 트랙별 정밀 매핑 정의
+        badge_map = {
+            'Track A': "🌲 **[우량주 트랙]**",
+            'Track B': "🚀 **[SNS 모멘텀]**",
+            'Track C': "🏛️ **[기관 스마트머니]**",
+            'Track D': "💡 **[VC 성장주]**",
+        }
+        
         for idx, item in enumerate(strong_buys, 1):
             track = item.get('track', 'Track A')
-            badge = "🌲 **[우량주 트랙]**" if track == 'Track A' else "🚀 **[SNS 모멘텀]**"
+            badge = badge_map.get(track, "🌲 **[우량주 트랙]**")
             
-            # [거래량 문자열 동적 분기] GPT 지적사항 완벽 반영
+            # [거래량 문자열 동적 분기]
             vol_val = item.get('vol_ratio', 1.0)
             if vol_val >= 1.2:
                 vol_desc = f"**{vol_val:.1f}배** 급증 (수급 유입)"
@@ -127,11 +152,11 @@ def generate_markdown_report(leading_sectors, candidates):
             md_content += f"- **현재 종가**: ${close_val:,.2f}{price_flag}\n"
             md_content += f"- **거래량 배수**: 20일 평균 대비 {vol_desc}\n"
             
-            if track == 'Track A':
+            if track in ['Track A', 'Track C', 'Track D']:
                 pe_str = f" | P/E: {item.get('pe', 0.0):.2f}" if item.get('pe', 0.0) > 0 else ""
                 peg_str = f" | PEG: {item.get('peg', 0.0):.2f}" if item.get('peg', 0.0) > 0 else ""
                 md_content += f"- **재무 및 가치 검증**: 기관 지분율 {item.get('inst_own', 0.0):.1f}% | 잉여현금흐름(FCF) ${item.get('fcf', 0):,.0f}{pe_str}{peg_str}\n"
-            else:
+            else: # Track B
                 pe_str = f" | P/E: {item.get('pe', 0.0):.2f}" if item.get('pe', 0.0) > 0 else ""
                 md_content += f"- **모멘텀 지표**: 최근 24시간 내 최소 **{item.get('mentions', 0)}회** 이상 커뮤니티 언급 폭증{pe_str}\n"
                 
@@ -171,8 +196,14 @@ def format_telegram_message(leading_sectors, candidates):
     msg += f"🏆 주도 섹터: {', '.join(leading_sectors[:2])}\n"
     msg += f"🔥 타점 포착 ({len(strong_buys)}개):\n"
     
+    icon_map = {
+        'Track A': '🌲',
+        'Track B': '🚀',
+        'Track C': '🏛️',
+        'Track D': '💡'
+    }
     for c in strong_buys:
-        track_icon = "🌲" if c.get('track', 'Track A') == 'Track A' else "🚀"
+        track_icon = icon_map.get(c.get('track', 'Track A'), '🌲')
         msg += f"- {track_icon} {c['ticker']} ({c.get('signal', '')[:5]} | {c.get('vol_ratio',1.0):.1f}배)\n"
         
     msg += f"\n📂 상세 리포트가 생성되었습니다."
