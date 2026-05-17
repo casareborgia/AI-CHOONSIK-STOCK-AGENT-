@@ -17,15 +17,64 @@ import config
 from core.technical_engine import analyze_technical_signals
 
 
+def migrate_legacy_reports():
+    """
+    기존에 reports/ 폴더 바로 아래 생성되었던 레거시 리포트들을
+    연도-분기-월 형식의 하위 디렉토리로 자동 분류 및 정리해 주는 마이그레이션 함수입니다.
+    """
+    import re
+    import shutil
+    
+    if not os.path.exists(config.OUTPUT_DIR):
+        return
+        
+    pattern = re.compile(r"^daily_briefing_(\d{4})-(\d{2})-(\d{2})\.md$")
+    
+    for filename in os.listdir(config.OUTPUT_DIR):
+        file_path = os.path.join(config.OUTPUT_DIR, filename)
+        
+        # 디렉토리가 아닌 일반 파일만 분류 진행
+        if os.path.isfile(file_path):
+            match = pattern.match(filename)
+            if match:
+                year = int(match.group(1))
+                month = int(match.group(2))
+                quarter = (month - 1) // 3 + 1
+                
+                # 동적 하위 디렉토리 이름 결정 (예: 2026년-2분기-5월)
+                subfolder_name = f"{year}년-{quarter}분기-{month}월"
+                target_dir = os.path.join(config.OUTPUT_DIR, subfolder_name)
+                
+                os.makedirs(target_dir, exist_ok=True)
+                dest_path = os.path.join(target_dir, filename)
+                
+                try:
+                    shutil.move(file_path, dest_path)
+                    print(f"📂 [리포트 분류 완료] {filename} -> {subfolder_name}/ 하위 폴더로 정리")
+                except Exception as e:
+                    print(f"⚠️ 레거시 리포트 분류 실패 ({filename}): {e}")
+
+
 def generate_markdown_report(leading_sectors, candidates):
     """
     분석 결과를 기반으로 일간 종합 마크다운 리포트를 생성 및 저장합니다.
     """
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    # 1. 기존 레거시 리포트 폴더 자동 마이그레이션 및 정돈
+    migrate_legacy_reports()
+    
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
     report_filename = f"daily_briefing_{today_str}.md"
     
-    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
-    report_path = os.path.join(config.OUTPUT_DIR, report_filename)
+    # 2. 연도-분기-월 동적 폴더명 연산 (예: 2026년-2분기-5월)
+    year = now.year
+    month = now.month
+    quarter = (month - 1) // 3 + 1
+    subfolder_name = f"{year}년-{quarter}분기-{month}월"
+    
+    target_dir = os.path.join(config.OUTPUT_DIR, subfolder_name)
+    os.makedirs(target_dir, exist_ok=True)
+    report_path = os.path.join(target_dir, report_filename)
     
     strong_buys = [c for c in candidates if "매수" in c.get('signal', '') or "폭발" in c.get('signal', '')]
     
