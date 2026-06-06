@@ -1,0 +1,158 @@
+# ==============================================================================
+# [AI Trading Agent] 파이프라인 메인 오케스트레이터 (Main Agent)
+# ==============================================================================
+# 시스템 전체의 5대 모듈을 유기적으로 연결하며, 기존 직렬 방식에서 벗어나
+# 펀더멘털 우량주(Track A)와 SNS 모멘텀 급등주(Track B)를 비동기(asyncio)로
+# 병렬 스캔하는 고성능 듀얼 트랙 오케스트레이터입니다.
+
+import sys
+import os
+import time
+import asyncio
+
+# 현재 디렉토리를 모듈 경로로 등록
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from core.sector_monitor import get_leading_sectors
+from core.fundamental_filter import get_fundamental_candidates, get_track_c_candidates, get_track_d_candidates
+from core.technical_engine import analyze_technical_signals
+from core.ai_verify import run_ai_verification
+from plugins.social_scanner import get_social_candidates
+import reporter
+
+
+async def execute_track_a(leading_names):
+    """
+    [Track A] 주도 섹터 기반 펀더멘털 우량주 스윙 트랙 (기존 프로세스 이식)
+    동기적 I/O 바운드 함수를 이벤트 루프 차단 없이 스레드 풀에서 병렬 실행합니다.
+    """
+    print("\n🌲 [Track A 가동] 펀더멘털 우량주 파이프라인 스레드 할당...")
+    # asyncio.to_thread를 통해 기존 블로킹 코드를 완벽히 비동기 래핑
+    cands = await asyncio.to_thread(get_fundamental_candidates, target_sectors=leading_names)
+    
+    # 트랙 출처 명시
+    for c in cands:
+        c['track'] = 'Track A'
+        
+    return cands
+
+
+async def execute_track_b():
+    """
+    [Track B] 재무 무시 커뮤니티 모멘텀 기반 급등주 트랙 (신규 파이프라인)
+    """
+    print("\n🚀 [Track B 가동] SNS 모멘텀 급등주 비동기 스캐너 할당...")
+    cands = await get_social_candidates()
+    return cands
+
+
+async def execute_track_c(leading_names):
+    """
+    [Track C] 대형 기관 스마트 머니 펀더멘털 트랙
+    """
+    print("\n🏛️ [Track C 가동] 기관 우량주 파이프라인 스레드 할당...")
+    cands = await asyncio.to_thread(get_track_c_candidates, target_sectors=leading_names)
+    return cands
+
+
+async def execute_track_d(leading_names):
+    """
+    [Track D] 실리콘밸리 VC 고성장 테크 트랙
+    """
+    print("\n🚀 [Track D 가동] 거물 VC 주도 테크주 파이프라인 스레드 할당...")
+    cands = await asyncio.to_thread(get_track_d_candidates, target_sectors=leading_names)
+    return cands
+
+
+async def run_quant_agent_async():
+    """
+    비동기 기반 탑다운 듀얼 트랙 분석 파이프라인을 관장합니다.
+    """
+    start_time = time.time()
+    print("================================================================================")
+    print("🚀 [AI 춘식 MK1] 듀얼 트랙(Dual-Track) 병렬 퀀트 시스템 가동 시작")
+    print("================================================================================")
+    
+    try:
+        # [단계 1: 숲 분석] 공통 선행 작업 - 시장 주도 섹터 파악
+        leading_names, leading_tickers = get_leading_sectors()
+        
+        # [단계 2: 병렬 나무 분석] 4개 트랙(A, B, C, D) 동시 스캔
+        print("\n⚡ [병렬 연산 가동] 4개 트랙(A, B, C, D) 동시 데이터 수집 시작...")
+        results = await asyncio.gather(
+            execute_track_a(leading_names),
+            execute_track_b(),
+            execute_track_c(leading_names),
+            execute_track_d(leading_names)
+        )
+        
+        track_a_cands, track_b_cands, track_c_cands, track_d_cands = results
+        
+        # 합집합(Union) 병합 (중복 제거 로직은 기술적 분석단에서 하거나 단순 합산)
+        # 티커 중복 방지를 위한 딕셔너리화
+        all_cands_dict = {}
+        for c in (track_a_cands + track_b_cands + track_c_cands + track_d_cands):
+            # 동일 티커가 여러 트랙에 속할 경우 나중에 병합된 트랙 정보 유지 (혹은 첫번째)
+            if c['ticker'] not in all_cands_dict:
+                all_cands_dict[c['ticker']] = c
+                
+        union_candidates = list(all_cands_dict.values())
+        
+        if not union_candidates:
+            print("\n⚠️ 모든 트랙에서 조건에 부합하는 종목이 포착되지 않았습니다. 파이프라인을 종료합니다.")
+            return
+            
+        print(f"\n🔗 [병합 완료] 총 {len(union_candidates)}개 후보군 확보 (Track A: {len(track_a_cands)} / Track B: {len(track_b_cands)} / Track C: {len(track_c_cands)} / Track D: {len(track_d_cands)})")
+        
+        # [단계 3: 타점 분석] 3중 파동에너지 및 거래량 급증 분석 (트랙별 기준 자동 분기 적용)
+        signals = analyze_technical_signals(union_candidates)
+        
+        # [정합성 보완] 시그널-펀더멘털 괴리 조율 오케스트레이터 가동
+        print("\n⚖️ [정합성 조율] 펀더멘털 밸류에이션 리스크 검증 및 시그널 보정 중...")
+        for item in signals:
+            if "매수" in item.get('signal', '') or "폭발" in item.get('signal', ''):
+                pe_val = item.get('pe', 0.0)
+                peg_val = item.get('peg', 0.0)
+                track = item.get('track', 'Track A')
+                disp_sec = item.get('disp_sector', item.get('sector', 'Unknown'))
+                
+                is_traditional = any(kw in disp_sec.lower() for kw in ['energy', 'industrial', 'material', 'consumer', 'utility'])
+                
+                # 초고평가 여부 스캔
+                if (is_traditional and pe_val > 40.0) or (not is_traditional and pe_val > 100.0) or (peg_val > 2.5):
+                    original_sig = item['signal']
+                    # 시그널명을 경고성 레이블로 자동 하향 보정 (여전히 '매수'/'폭발' 키워드를 포함하여 후속 파이프라인에는 인입됨)
+                    item['signal'] = f"⚠️ 기술적 돌파이나 재무적 고평가 주의 ({original_sig})"
+                    print(f"   [시그널 조정] {item['ticker']}: {original_sig} -> ⚠️ 기술적 돌파이나 재무적 고평가 주의 ({original_sig}) (P/E: {pe_val:.2f}, PEG: {peg_val:.2f})")
+        
+        # [단계 4: AI 검증] 타점 포착 종목 대상 Gemma 4 맞춤형 프롬프트 검증
+        ai_verified_results = run_ai_verification(signals, leading_sectors=leading_names)
+        
+        # [단계 5: 리포팅] 최종 통합 마크다운 문서 생성 및 텔레그램 발송
+        report_path = reporter.generate_markdown_report(leading_names, ai_verified_results)
+        tele_msg = reporter.format_telegram_message(leading_names, ai_verified_results)
+        
+        # [단계 6: 텔레그램 실시간 알림]
+        print("\n📱 [텔레그램 전송] 분석 결과를 전송 중입니다...")
+        await reporter.send_telegram_message(tele_msg)
+        
+        # 소요 시간 연산
+        elapsed = time.time() - start_time
+        print("\n================================================================================")
+        print(f"✨ [실행 완료] 병렬 파이프라인 가동 성공 (총 소요시간: {elapsed:.1f}초)")
+        print(f"📂 저장된 종합 리포트 경로: {report_path}")
+        print("================================================================================")
+        
+    except Exception as e:
+        print(f"\n❌ 파이프라인 비동기 실행 중 치명적 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def run_quant_agent():
+    """외부 호출용 동기 엔트리 포인트 래퍼"""
+    asyncio.run(run_quant_agent_async())
+
+
+if __name__ == "__main__":
+    run_quant_agent()
