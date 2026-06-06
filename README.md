@@ -1,78 +1,59 @@
-# 🚀 AI Chunsik MK1.5: Quad-Track Autonomous Quant Agent
+# 🚀 AI Chunsik MK3: Dual-LLM Autonomous Portfolio Thesis Agent
 
-**AI 춘식 MK1.5**는 시장의 '숫자(재무)'와 '목소리(SNS)', 그리고 '대형 자금(기관/VC)'을 동시에 다각 분석하는 하이브리드 인공지능 퀀트 투자 에이전트입니다. 단순히 차트만을 읽는 것을 넘어, 거시적 섹터 순환매부터 13F 헤지펀드 동향 및 소셜 모멘텀까지 포착하고 강력한 리스크 매니지먼트 레이어로 제어하여 최적의 스윙 타점을 도출합니다.
+**AI 춘식 MK3**는 시장의 핵심 지표(재무, 수급, 기술적 타점) 분석을 바탕으로 로컬 **듀얼 LLM(Dual-LLM)** 협동 아키텍처를 가동하여 투자 포트폴리오의 **Thesis Map(투자 가설)**을 스스로 수립하고, 24시간 실시간 뉴스 모멘텀을 감시하여 투자 가설 훼손(Kill Condition) 여부를 실시간으로 판별 및 경고하는 상시 밀착형 지능형 퀀트 투자 에이전트입니다.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python)
 ![Framework](https://img.shields.io/badge/Framework-Asyncio-orange?style=for-the-badge)
-![LLM](https://img.shields.io/badge/AI-Gemma_4-red?style=for-the-badge)
+![LLM Architecture](https://img.shields.io/badge/AI_Arch-Dual_LLM-purple?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 ---
 
-## 💡 System Architecture: The Quad-Track Pipeline
+## 💡 System Architecture: The Thesis-Driven Pipeline
 
-본 시스템은 **4개의 독립적인 분석 트랙(Quad-Track)**을 비동기(Asynchronous)로 병렬 실행하여 다각도로 기회를 스캔합니다.
+본 시스템은 **4대 분석 트랙(Quad-Track)**을 기반으로 유망 종목을 스캔하고, 획득한 타점 후보군에 대해 투자 아이디어를 작성하며, 24시간 백그라운드 데몬이 뉴스 피드를 수집하여 기존 투자 가설에 훼손이 생겼는지 추적 분석합니다.
 
 ```mermaid
 graph TD
-    A[Market Close / Schedule Trigger] --> B{Quad-Track Scan}
+    A[NYSE Schedule / launchd Trigger] --> B{Manager: auto_runner.py}
+    B -->|Check State File| C[Execute main_orchestrator.py]
+    B -->|Fork / Maintain Daemon| D[Execute chatbot_daemon.py]
     
-    B -->|Track A: Forest| C[Sector Rotation & Fundamental Scanner]
-    B -->|Track B: Crowd| D[Reddit/StockTwits Social Scanner]
-    B -->|Track C: Gurus| E[13F Institutional Hedge Fund Holdings]
-    B -->|Track D: Whales| F[Silicon Valley VC Portfolio Leaders]
+    C -->|Quant Scanner| E[Quad-Track Market Scan]
+    E --> F[Stochastic & Moving Average Convergence Engine]
+    F --> G[Dual LLM: Light vs Heavy Cooperation]
+    G --> H[Create & Send Daily Briefing PDF/MD]
     
-    C & D & E & F --> G[Technical Wave Energy Engine]
-    G --> H[Intelligent Risk Management Layer]
-    H --> I[Local LLM Gemma 4 Deep Verification]
-    I --> J[Report Generator & Telegram Alert]
+    D -->|Telegram Updates| I[Telegram Listener: TelegramAgent]
+    I -->|/add NVDA| J[Build Investment Thesis Map & Register DB]
+    I -->|/check NVDA| K[Fetch 24h/168h News & Evaluate Thesis Change]
+    K -->|Alert Trigger| L[Telegram Alarm & Push Notification]
 ```
 
-### 🌲 Track A: Fundamental Strength (The Forest)
-*   **Sector Rotation**: 11대 SPDR 섹터 ETF의 자금 흐름을 추적하여 현재 시장을 주도하는 섹터를 우선 선별합니다.
-*   **Quantitative Filtering**: Finviz 고속 필터링을 거쳐 시가총액, 부채비율, FCF(잉여현금흐름) 등 우량성 기준을 충족하는 후보군을 추출합니다.
-
-### 🚀 Track B: Social Momentum (The Crowd)
-*   **3-Tier Social Scanner**: Reddit(`r/wallstreetbets`) 및 StockTwits API 실시간 데이터 피드를 비동기로 스캔하여 개인 투자자의 수급이 결집되는 핵심 티커를 포착합니다.
-*   **Anti-Noise Filter**: 노이즈 단어를 차단하는 Regex 필터와 지능형 스팸 블랙리스트를 갖추고 있으며, API 제한 시 무료 스크래핑으로 자동 대체되는 중단 없는 구조를 제공합니다.
-
-### 🏛️ Track C: Institutional Gurus (The Smart Money)
-*   **13F Holdings Analyzer**: Berkshire Hathaway, Scion Asset Management, Pershing Square 등 전설적인 기관 투자자들의 분기별 공시 자료(13F)를 실시간 반영합니다.
-*   **FMP & Dataroma Hybrid**: API 키 유무 및 잔여 한도에 맞춰 유료 API와 무료 정밀 스크래퍼가 유기적으로 교차 가동되는 하이브리드 수집 구조를 갖추고 있습니다.
-
-### 💡 Track D: Venture Capital Whales (The Silicon Valley)
-*   **Silicon Valley Whales Watch**: Founders Fund, Sequoia Capital, a16z 등 시장 파괴적인 성장성을 주도하는 실리콘밸리 거물 VC 포트폴리오를 추적합니다.
-*   **Growth-Oriented Filters**: 적자 성장주 세그먼트를 감안하여 FCF 기준을 유연하게 적용하되, 폭발적인 추세 전환점을 타겟팅하는 특화 필터를 적용합니다.
-
 ---
 
-## 🛡️ Intelligent Risk Management Layer (Phase 2)
+## ✨ AI 춘식 MK3 핵심 개선 사항 (Key Features)
 
-MK1.5 버전에서 새롭게 보강된 **초정밀 리스크 방어망**은 기술적 돌파 시그널의 왜곡을 방지하고 포트폴리오의 안정성을 기관급으로 격상시킵니다.
+### 1. 🤖 듀얼 LLM 협동 아키텍처 (Dual-LLM Architecture)
+*   **역할 분담 및 효율화**: 
+    *   **Light LLM (`gemma4` 등)**: 가벼운 데이터 포맷 검증, 단순 1차 팩트 체크 및 JSON 교정 등의 태스크를 고속 처리하여 레이턴시와 리소스를 절감합니다.
+    *   **Heavy LLM (`gemma4:26b` 등)**: 심층 재무 및 소셜 감성 융합 분석, 실시간 뉴스 기반 투자 가설(Thesis) 평가, 최종 리포트 내러티브 작성 등의 복잡한 논리 추론 작업을 심도 있게 담당합니다.
 
-1.  **변동성(Beta) 기반 동적 손절 수칙 (Dynamic Stop-Loss)**
-    *   Yahoo Finance에서 종목별 체계적 위험(`beta`)을 수집하여 `stop_loss_pct = round(max(5.0, min(12.0, 5.0 * beta)))` 공식에 따라 **-5%에서 최대 -12%까지** 동적 손절선을 자동 부과합니다.
-2.  **재무-시그널 괴리 오케스트레이터 (Autopilot Valuation Downgrader)**
-    *   기술적 지표가 "강력매수"일지라도 밸류에이션 과열 임계치(전통 섹터 P/E > 40, 테크 섹터 P/E > 100, PEG > 2.5)를 초과하는 종목은 즉시 **`⚠️ 기술적 돌파이나 재무적 고평가 주의 (시그널)`**로 등급을 자동 격하합니다.
-3.  **퀀트 트리플 내러티브 검증 지침**
-    *   **이익의 질(Earnings Quality)**: 이익 압착(Earnings Compression) 기저효과에 의해 P/E, PEG 수치가 착시를 불러일으키는 밸류에이션 함정을 선별합니다.
-    *   **공매도 이중 대차 착시**: 기관 지분율이 100%를 초과하는 비정상적인 종목 포착 시, 주식 대차 거래로 생기는 '숏인터레스트(Short Interest) 착시'를 규명하여 수급 왜곡을 경고합니다.
-    *   **유동성 고점 drift**: 52주 고점 위치에서의 저거래량 흐름을 상방 소진 및 유동성 고갈 리스크 관점으로 냉철하게 평가합니다.
-4.  **포트폴리오 섹터 집중도 경고 시스템**
-    *   동일 섹터 종목이 3개 이상 포착될 경우 리포트 상단에 동적으로 **GitHub Alerts 경고 배지(`> [!WARNING]`)**를 삽입하여 포트폴리오의 분산 투자를 보좌합니다.
-5.  **동적 리포트 서브 폴더링 및 자동 정돈 (Dynamic Organizer)**
-    *   리포트가 무한히 쌓여 난잡해지는 현상을 막기 위해 실행 시점 기준 **`연도-분기-월 (예: 2026년-2분기-5월)`** 디렉토리를 자동 생성하고 수납합니다.
-    *   메인 `reports/` 폴더에 방치된 레거시 리포트들을 폴더 생성 즉시 알아서 수집 및 이동 수납하는 인텔리전트 마이그레이션(`migrate_legacy_reports`) 로직이 내장되어 있습니다.
+### 📡 2. 24시간 대화형 챗봇 데몬 (`chatbot_daemon.py`)
+텔레그램 메신저를 통해 실시간으로 챗봇과 소통하며 관심 종목을 추가하고 실시간 Thesis 훼손 검사를 명령할 수 있습니다.
+*   **`/add [티커]`**: yfinance 데이터 및 로컬 AI 분석을 거쳐 해당 종목의 **투자 Thesis, 핵심 지표, 촉매, 리스크, Kill Condition(매도 조건), 소음 필터(Noise Rules)** 등을 자동으로 작성하여 DB에 등록합니다.
+*   **`/check [티커]`**: 최근 24시간~최대 7일간 발생한 해당 종목의 뉴스 및 공시를 실시간 크롤링하여, **기존에 수립된 투자 가설과 매도 조건에 부정적인 변화가 일어났는지**를 AI가 교차 분석하여 변화 브리핑을 즉각 보고합니다.
+*   **`/list` / `/del [티커]`**: 현재 춘식이가 24시간 밀착 감시 중인 보유 종목 목록을 조회하거나 삭제합니다.
+*   **🚫 보안 입력 검증 및 자원 보호**: 입력 명령어에 영문 1~5자리 정규식 검증(Regex Validation)을 이식하여 유해 텍스트 입력으로 인한 로컬 LLM 과부하 DoS 공격을 방어합니다.
 
----
+### ⏰ 3. 상태 기반 결함 감내 자동화 스케줄러 (`auto_runner.py`)
+*   **스마트 세션 감지**: NYSE 미국 주식시장 캘린더(`exchange_calendars`)와 안전하게 연동되어 주말/공휴일 예외를 회피하며, 장 시작(시가 분석) 및 장 마감(종가 분석) 시점에 정확히 보고서를 발송합니다.
+*   **`run_state.json` 상태 기계**: 맥미니 가동 도중 절전 모드로 진입하거나 예상치 못한 전원 꺼짐 현상이 발생하더라도, 재가동 즉시 상태 파일을 확인하여 누락되었던 직전 분석 세션을 자동으로 찾아내 보완 실행(Fault Tolerance)합니다.
+*   **챗봇 데몬 자가 치유(Heartbeat)**: 1시간에 한 번씩 하위 프로세스인 챗봇 리스너 데몬의 생존 여부를 모니터링하여, 예기치 않게 프로세스가 죽어있는 경우 자동으로 재기동합니다.
 
-## ⚙️ Core Modules & Wave Theory
-
-*   **Technical Engine (Wave Energy)**: 
-    *   스토캐스틱 대/중/소 파동에너지 지표의 정배열 및 다중 골든크로스를 감지하여 상방 에너지를 판단합니다.
-    *   20일 평균 거래량 대비 **1.2배 이상**의 거래량 폭발을 필수 동반 타점으로 요구합니다.
-*   **AI Verification (Local Gemma 4)**: 
-    *   로컬 Ollama를 연동하여 **Gemma 4:26b** 모델로 가치, 수급, 뉴스 모멘텀을 결합한 비판적인 퀀트 검증을 최종 수행합니다.
+### 📈 4. 리스크 관리 레이어 및 이평선 수렴 분석 보강 (`technical_engine.py`)
+*   **유동성 및 수렴 분석**: 스토캐스틱 파동 외에도 60일, 120일선 등 장기 이동평균선 정배열/역배열을 판별하고 편차를 분석하여, 에너지가 응축된 수렴 구간과 이격 과열 구간을 감지합니다.
+*   **리스크 프로파일 연동**: `config.py`의 `USER_RISK_PROFILE` 설정(보수/균형/공격)에 부합하도록 밸류에이션(P/E, PEG) 가드레일을 통제하여 투자 안정성을 높였습니다.
 
 ---
 
@@ -80,7 +61,7 @@ MK1.5 버전에서 새롭게 보강된 **초정밀 리스크 방어망**은 기�
 
 ### Prerequisites
 *   Python 3.9+
-*   [Ollama](https://ollama.ai/) (로컬 `gemma4:26b` 또는 원하는 로컬 LLM 모델 설치)
+*   [Ollama](https://ollama.ai/) (로컬 `gemma4` 및 `gemma4:26b` 모델 설치)
 *   텔레그램 봇 토큰 및 수신용 Chat ID (선택 사항)
 
 ### Setup
@@ -92,24 +73,33 @@ cd AI-CHOONSIK-STOCK-AGENT-
 # 2. 필수 라이브러리 설치
 pip install -r requirements.txt
 
-# 3. 환경 변수 설정
-# 프로젝트 루트에 .env 파일을 생성하고 아래 양식으로 채워 넣습니다.
-# FMP_API_KEY가 없거나 미설정 시 무료 Dataroma 스크래핑 엔진으로 자동 폴백 구동됩니다.
+# 3. 환경 변수 설정 (.gitignore로 유출 방지 처리됨)
+# 프로젝트 루트에 .env 파일을 생성하고 아래 형식으로 채워 넣습니다.
 TELEGRAM_BOT_TOKEN="여기에 텔레그램 봇 토큰 입력"
 TELEGRAM_CHAT_ID="여기에 수신할 챗 ID 입력"
-FMP_API_KEY="여기에 FMP API 키 입력 (선택)"
+FMP_API_KEY="선택 사항: FMP API 키 (없을 경우 Dataroma로 자동 폴백)"
 ```
 
 ### Usage
-```bash
-# 퀀트 스캐너 및 AI 리포터 파이프라인 수동 즉시 구동
-python main_agent.py
 
-# 스마트 머니 와치리스트 (Track C/D) 최신 holdings 정보 실시간 업데이트
-python update_watchlist.py
+#### 1. 24시간 스케줄러 & 챗봇 통합 기동
+맥미니에서 상시 가동 스케줄러 및 실시간 챗봇을 백그라운드로 구동하려면 아래 스크립트를 실행합니다.
+```bash
+# launchd 서비스 등록 및 백그라운드 기동
+chmod +x register_service.sh start_chunsik.command
+./register_service.sh
+```
+
+#### 2. 수동 강제 분석 및 1회성 테스트
+```bash
+# 퀀트 스캔 및 AI 리포터 즉시 수동 구동
+python main_orchestrator.py
+
+# 텔레그램 챗봇 리스너 데몬만 단독 구동
+python chatbot_daemon.py
 ```
 
 ---
 
 ## ⚠️ Disclaimer
-본 프로젝트는 학습 및 퀀트 정보 제공을 목적으로 개발된 오픈소스 에이전트입니다. 모든 투자에 대한 최종 결정과 책임은 투자자 본인에게 있으며, AI의 분석 결과와 리스크 모델링 수치가 어떠한 주식 시장의 수익률도 확정적으로 보장하지 않습니다.
+본 프로젝트는 개인의 학습 및 퀀트 정보 제공을 목적으로 개발된 오픈소스 에이전트입니다. 모든 투자에 대한 최종 결정과 책임은 투자자 본인에게 있으며, AI의 분석 결과와 리스크 모델링 수치가 어떠한 주식 시장의 수익률도 확정적으로 보장하지 않습니다.
