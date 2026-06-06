@@ -1,0 +1,6 @@
+.env
+*.db
+*.log
+__pycache__/
+.DS_Store
+run_state.json

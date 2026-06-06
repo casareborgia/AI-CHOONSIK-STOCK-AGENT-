@@ -1,0 +1,110 @@
+import asyncio
+import logging
+import sys
+import time
+
+from message_bus.broker import MessageBroker
+from agents.market_agent import MarketAgent
+from agents.screener_agent import ScreenerAgent
+from agents.technical_agent import TechnicalAgent
+from agents.critic_agent import CriticAgent
+from agents.db_agent import DBAgent
+from agents.reporter_agent import ReporterAgent
+# from agents.telegram_agent import TelegramAgent
+from agents.thesis_agent import ThesisAgent
+from learning.reflection_engine import ReflectionEngine
+
+# 루트 로거 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("Orchestrator")
+
+async def main():
+    start_time = time.time()
+    logger.info("================================================================================")
+    logger.info("🚀 [춘식 MK3] 멀티 에이전트 기반 투자 의사결정 보조 시스템 기동")
+    logger.info("================================================================================")
+
+    # 0. 지연 성찰(Deferred Reflection) 배치 구동 (사후 성과 추적)
+    skip_reflection = "--skip-reflection" in sys.argv
+    if not skip_reflection:
+        logger.info("Starting Deferred Reflection Engine...")
+        reflection_engine = ReflectionEngine()
+        await reflection_engine.run_reflection_batch()
+    else:
+        logger.info("⏭️ Deferred Reflection Engine skipped by user flag.")
+
+    # 1. 메시지 브로커 생성
+    broker = MessageBroker()
+
+    # 2. 에이전트 인스턴스화
+    market_agent = MarketAgent("MarketAgent", broker)
+    screener_agent = ScreenerAgent("ScreenerAgent", broker)
+    technical_agent = TechnicalAgent("TechnicalAgent", broker)
+    critic_agent = CriticAgent("CriticAgent", broker)
+    db_agent = DBAgent("DBAgent", broker)
+    reporter_agent = ReporterAgent("ReporterAgent", broker)
+    # telegram_agent = TelegramAgent("TelegramAgent", broker)
+    thesis_agent = ThesisAgent("ThesisAgent", broker)
+ 
+    agents = [
+        market_agent,
+        screener_agent,
+        technical_agent,
+        critic_agent,
+        db_agent,
+        reporter_agent,
+        # telegram_agent,
+        thesis_agent
+    ]
+
+    # 3. 모든 에이전트 백그라운드 구동 시작
+    logger.info("Starting all agents in the background...")
+    for agent in agents:
+        await agent.start()
+
+    # 4. 오케스트레이터 완료 감시용 큐 등록
+    done_queue = asyncio.Queue()
+    await broker.subscribe("system/done", done_queue)
+    logger.info("Orchestrator subscribed to 'system/done' for monitoring execution completion.")
+
+    # 5. 파이프라인 시작 트리거 신호 발행
+    logger.info("Publishing 'system/trigger' to initiate execution flow.")
+    await broker.publish("system/trigger", {"action": "start"})
+
+    # 6. 완료 신호 대기
+    try:
+        channel, result = await done_queue.get()
+        logger.info(f"Received completion signal on '{channel}': {result}")
+        done_queue.task_done()
+    except asyncio.CancelledError:
+        logger.warning("Orchestrator execution was cancelled.")
+    finally:
+        # 7. 구독 해제 및 모든 에이전트 정상 정지
+        logger.info("Shutting down all active agents...")
+        await broker.unsubscribe("system/done", done_queue)
+        
+        # 에이전트들을 안전하게 정지
+        await asyncio.gather(*(agent.stop() for agent in agents))
+
+    elapsed = time.time() - start_time
+    logger.info("================================================================================")
+    if result.get("status") == "success":
+        logger.info(f"✨ [실행 완료] 멀티 에이전트 파이프라인 구동 성공 (총 소요시간: {elapsed:.1f}초)")
+        logger.info(f"📂 저장된 종합 리포트 경로: {result.get('report_path')}")
+    else:
+        logger.error(f"❌ [실행 실패] 파이프라인 수행 실패 (소요시간: {elapsed:.1f}초)")
+        logger.error(f"⚠️ 에러 내역: {result.get('error') or result.get('status')}")
+    logger.info("================================================================================")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("\nProcess terminated by user (KeyboardInterrupt).")

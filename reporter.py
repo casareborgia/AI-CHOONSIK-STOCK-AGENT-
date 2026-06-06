@@ -1,0 +1,355 @@
+# ==============================================================================
+# [AI Trading Agent] 출력 모듈 (Reporter)
+# ==============================================================================
+# 파이프라인의 최종 분석 결과를 정제하여 마크다운(Markdown) 리포트 파일로 저장하고,
+# 텔레그램 등의 메신저 발송을 위한 요약 텍스트를 포맷팅합니다.
+# 
+# [정합성 극대화] 거래량 배수가 낮을 때도 '급증'이라고 하드코딩되던 논리적 오류를
+# 동적 분기(급증/평균/응축)로 해결하고, 4대 시장 지수 행 누락 방지 로직을 유지합니다.
+
+import sys
+import os
+from datetime import datetime
+
+# 부모 디렉토리 경로 추가
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+import config
+from core.technical_engine import analyze_technical_signals
+
+
+def migrate_legacy_reports():
+    """
+    기존에 reports/ 폴더 바로 아래 생성되었던 레거시 리포트들을
+    연도-분기-월 형식의 하위 디렉토리로 자동 분류 및 정리해 주는 마이그레이션 함수입니다.
+    """
+    import re
+    import shutil
+    
+    if not os.path.exists(config.OUTPUT_DIR):
+        return
+        
+    pattern = re.compile(r"^daily_briefing_(\d{4})-(\d{2})-(\d{2})\.md$")
+    
+    for filename in os.listdir(config.OUTPUT_DIR):
+        file_path = os.path.join(config.OUTPUT_DIR, filename)
+        
+        # 디렉토리가 아닌 일반 파일만 분류 진행
+        if os.path.isfile(file_path):
+            match = pattern.match(filename)
+            if match:
+                year = int(match.group(1))
+                month = int(match.group(2))
+                quarter = (month - 1) // 3 + 1
+                
+                # 동적 하위 디렉토리 이름 결정 (예: 2026년-2분기-5월)
+                subfolder_name = f"{year}년-{quarter}분기-{month}월"
+                target_dir = os.path.join(config.OUTPUT_DIR, subfolder_name)
+                
+                os.makedirs(target_dir, exist_ok=True)
+                dest_path = os.path.join(target_dir, filename)
+                
+                try:
+                    shutil.move(file_path, dest_path)
+                    print(f"📂 [리포트 분류 완료] {filename} -> {subfolder_name}/ 하위 폴더로 정리")
+                except Exception as e:
+                    print(f"⚠️ 레거시 리포트 분류 실패 ({filename}): {e}")
+
+
+def generate_markdown_report(leading_sectors, sub_theme_results, candidates):
+    """
+    분석 결과를 기반으로 일간 종합 마크다운 리포트를 생성 및 저장합니다.
+    """
+    # 1. 기존 레거시 리포트 폴더 자동 마이그레이션 및 정돈
+    migrate_legacy_reports()
+    
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    report_filename = f"daily_briefing_{today_str}.md"
+    
+    # 2. 연도-분기-월 동적 폴더명 연산 (예: 2026년-2분기-5월)
+    year = now.year
+    month = now.month
+    quarter = (month - 1) // 3 + 1
+    subfolder_name = f"{year}년-{quarter}분기-{month}월"
+    
+    target_dir = os.path.join(config.OUTPUT_DIR, subfolder_name)
+    os.makedirs(target_dir, exist_ok=True)
+    report_path = os.path.join(target_dir, report_filename)
+    
+    strong_buys = [c for c in candidates if "매수" in c.get('signal', '') or "폭발" in c.get('signal', '')]
+    
+    print("\n📊 [리포팅 준비] 미국 4대 대표 시장 지수 파동 현황 집계 중...")
+    index_candidates = [
+        {'ticker': symbol, 'name': name, 'sector': 'Market Index', 'track': 'Index'} 
+        for name, symbol in config.MARKET_INDICES.items()
+    ]
+    
+    index_signals = analyze_technical_signals(index_candidates)
+    sig_map = {item['ticker']: item for item in index_signals}
+    
+    index_name_map = {
+        'DIA': '다우존스 (DIA)',
+        'QQQ': '나스닥 100 (QQQ)',
+        'SPY': 'S&P 500 (SPY)',
+        'IWM': '러셀 2000 (IWM)'
+    }
+    
+    md_content = f"""# 📈 [AI 춘식 MK2] 미국 주식 파동에너지 퀀트 브리핑 ({today_str})
+
+본 리포트는 **파동에너지 이론(Wave Energy Theory)**을 바탕으로 자금 흐름, 기본적 가치, 기술적 타점을 입체 분석한 기관급 자동 스크리닝 결과입니다.
+*(데이터 소스: Yahoo Finance API 정규장 종가 기준)*
+
+---
+
+## 📊 1. 미국 4대 시장 지수 파동 현황
+현재 증시 전체의 투심을 지배하는 핵심 지수 4개의 파동에너지 및 기술적 상태입니다.
+
+| 지수명 (티커) | 현재 종가 | 파동 시그널 상태 | 스토캐스틱 요약 |
+| :--- | :---: | :---: | :---: |
+"""
+    
+    for symbol in ['DIA', 'QQQ', 'SPY', 'IWM']:
+        disp_name = index_name_map.get(symbol, symbol)
+        item = sig_map.get(symbol, {})
+        
+        close_val = item.get('close', 0.0)
+        sig_str = item.get('signal', '데이터 집계 지연')
+        stoch_str = item.get('stoch_summary', 'N/A')
+        
+        if "매수" in sig_str or "폭발" in sig_str:
+            sig_str = f"**{sig_str}**"
+            
+        md_content += f"| **{disp_name}** | ${close_val:,.2f} | {sig_str} | `{stoch_str}` |\n"
+        
+    md_content += f"""
+> **💡 지수 분석 팁**: 대형주(SPY/QQQ)와 소형주(IWM)의 시그널 괴리가 발생할 경우, 상승 시그널이 강한 시장에 속한 종목군에 비중을 실어 대응하십시오.
+
+---
+
+## 🏆 2. 오늘의 탑다운 주도 섹터 및 세부 테마 (자금 유입 최상위)
+현재 미국 증시 전체에서 자금이 집중되고 있는 상위 주도 섹터와 그에 따른 마이크로 테마 현황입니다.
+"""
+    
+    for idx, sec in enumerate(leading_sectors, 1):
+        md_content += f"\n### 🏆 TOP {idx} 섹터: {sec}\n"
+        
+        # 하위 세부 테마가 있으면 표 형식으로 렌더링
+        if sub_theme_results and sec in sub_theme_results:
+            md_content += "| 세부 테마 | 대표 ETF | 1M 모멘텀 | 대파동 상태 | 핵심 특징 |\n"
+            md_content += "| :--- | :---: | :---: | :---: | :--- |\n"
+            for t in sub_theme_results[sec]:
+                md_content += f"| **{t['theme_name']}** | `{t['ticker']}` | {t['roc_1m']:.2f}% | {t['status']} | {t['desc']} |\n"
+            md_content += "\n"
+        else:
+            md_content += "*하위 세부 테마 정보 없음*\n\n"
+        
+    md_content += f"""
+> **💡 탑다운 전략 안내**: 소외 섹터의 종목은 가급적 매수를 피하고, 위 주도 섹터 내부에서 파동 시그널이 발생한 종목을 최우선 공략하십시오.
+
+---
+
+## 🎯 3. 정밀 타점 포착 핵심 후보군 (총 {len(strong_buys)}개)
+- **Track A (펀더멘털 스윙 트랙)**: {len([c for c in strong_buys if c.get('track', 'Track A') == 'Track A'])}개 포착
+- **Track B (SNS 모멘텀 급등 트랙)**: {len([c for c in strong_buys if c.get('track') == 'Track B'])}개 포착
+- **Track C (기관 스마트머니 트랙)**: {len([c for c in strong_buys if c.get('track') == 'Track C'])}개 포착
+- **Track D (테크 VC 성장주 트랙)**: {len([c for c in strong_buys if c.get('track') == 'Track D'])}개 포착
+
+"""
+    
+    # [정합성 보완] 섹터 쏠림도 진단 모듈 가동
+    sector_counts = {}
+    for c in strong_buys:
+        sec = c.get('sector', 'Unknown')
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+        
+    overconcentrated_sectors = {sec: count for sec, count in sector_counts.items() if count >= 3}
+    if overconcentrated_sectors:
+        md_content += "> [!WARNING]\n"
+        md_content += "> **⚠️ 포트폴리오 섹터 집중 리스크 경고**\n"
+        for sec, count in overconcentrated_sectors.items():
+            md_content += f"> 오늘 포착된 {len(strong_buys)}개 종목 중 무려 **{count}개**가 **[{sec}]** 섹터에 쏠려 있습니다.\n"
+        md_content += "> 특정 섹터 올인은 국제유가, 규제 정책 등 거시적 매크로 변수에 포트폴리오 전체가 동시 노출되는 대단히 취약한 구조를 야기합니다. 리스크의 기계적 분산을 위해 타 섹터(예: Technology, Materials 등)의 우량 대안군을 믹스하거나, 동일 섹터 내 투입 비중을 철저히 낮춰 대응하는 분산 자산 배분 전략을 강력히 권장합니다.\n\n"
+
+    if not strong_buys:
+        md_content += "오늘 시장에서는 거래량 급증을 동반한 완벽한 찐폭발/매수 타점 종목이 포착되지 않았습니다. 현금 비중 유지를 권장합니다.\n"
+    else:
+        # 트랙별 정밀 매핑 정의
+        badge_map = {
+            'Track A': "🌲 **[우량주 트랙]**",
+            'Track B': "🚀 **[SNS 모멘텀]**",
+            'Track C': "🏛️ **[기관 스마트머니]**",
+            'Track D': "💡 **[VC 성장주]**",
+        }
+        
+        for idx, item in enumerate(strong_buys, 1):
+            track = item.get('track', 'Track A')
+            badge = badge_map.get(track, "🌲 **[우량주 트랙]**")
+            
+            # [거래량 문자열 동적 분기]
+            vol_val = item.get('vol_ratio', 1.0)
+            if vol_val >= 1.2:
+                vol_desc = f"**{vol_val:.1f}배** 급증 (수급 유입)"
+            elif vol_val >= 0.8:
+                vol_desc = f"**{vol_val:.1f}배** (평균 수준)"
+            else:
+                vol_desc = f"**{vol_val:.1f}배** (저조 / 추세 지속을 위한 에너지 응축 구간)"
+                
+            disp_sec = item.get('disp_sector', item.get('sector', 'Unknown'))
+            sub_sector = item.get('sub_sector', 'General')
+            sub_sector_desc = item.get('sub_sector_desc', '')
+            
+            close_val = item.get('close', 0.0)
+            high_val = item.get('high', 0.0)
+            low_val = item.get('low', 0.0)
+            
+            # 가격 오차 플래그 판별
+            price_flag = ""
+            if high_val > 0 and low_val > 0:
+                if close_val > high_val or close_val < low_val:
+                    price_flag = " `⚠️ 데이터 소스 오차 주의`"
+                
+            md_content += f"### {idx}. {badge} {item.get('name', item['ticker'])} (`{item['ticker']}`)\n\n"
+            md_content += f"- **시그널 상태**: **{item.get('signal', '알 수 없음')}**\n"
+            md_content += f"- **소속 섹터**: {disp_sec} | **세부 테마**: {sub_sector} ({sub_sector_desc})\n"
+            md_content += f"- **현재 종가**: ${close_val:,.2f}{price_flag}\n"
+            md_content += f"- **거래량 배수**: 20일 평균 대비 {vol_desc}\n"
+            
+            if track in ['Track A', 'Track C', 'Track D']:
+                pe_str = f" | P/E: {item.get('pe', 0.0):.2f}" if item.get('pe', 0.0) > 0 else ""
+                peg_str = f" | PEG: {item.get('peg', 0.0):.2f}" if item.get('peg', 0.0) > 0 else ""
+                md_content += f"- **재무 및 가치 검증**: 기관 지분율 {item.get('inst_own', 0.0):.1f}% | 잉여현금흐름(FCF) ${item.get('fcf', 0):,.0f}{pe_str}{peg_str}\n"
+            else: # Track B
+                pe_str = f" | P/E: {item.get('pe', 0.0):.2f}" if item.get('pe', 0.0) > 0 else ""
+                md_content += f"- **모멘텀 지표**: 최근 24시간 내 최소 **{item.get('mentions', 0)}회** 이상 커뮤니티 언급 폭증{pe_str}\n"
+                
+            md_content += f"- **파동 요약**: `{item.get('stoch_summary', '')}`\n"
+            
+            # [📡 멀티타임프레임 크로스체크 렌더링]
+            mtf_info = item.get('mtf_analysis')
+            if mtf_info:
+                w_res = mtf_info['weekly']
+                d_res = mtf_info['daily']
+                f_res = mtf_info['four_h']
+                
+                w_sig = ", ".join(w_res['signals']) if w_res['signals'] else "시그널 없음"
+                d_sig = ", ".join(d_res['signals']) if d_res['signals'] else "시그널 없음"
+                f_sig = ", ".join(f_res['signals']) if f_res['signals'] else "시그널 없음"
+                
+                w_stoch = f"S:{'▲' if w_res['stoch']['small']['rising'] else '▼'} M:{'▲' if w_res['stoch']['mid']['rising'] else '▼'} L:{'▲' if w_res['stoch']['large']['rising'] else '▼'}"
+                d_stoch = f"S:{'▲' if d_res['stoch']['small']['rising'] else '▼'} M:{'▲' if d_res['stoch']['mid']['rising'] else '▼'} L:{'▲' if d_res['stoch']['large']['rising'] else '▼'}"
+                f_stoch = f"S:{'▲' if f_res['stoch']['small']['rising'] else '▼'} M:{'▲' if f_res['stoch']['mid']['rising'] else '▼'} L:{'▲' if f_res['stoch']['large']['rising'] else '▼'}"
+                
+                md_content += f"- **📡 멀티타임프레임 크로스체크** (타점 등급: **[{mtf_info.get('entry_grade', 'N/A')}]**)\n"
+                md_content += f"  - `{mtf_info.get('summary', '')}`\n"
+                md_content += f"  - **주봉 (Weekly)**: 이평추세 `{w_res['ma_trend'].upper()}` | 파동 `{w_stoch}` | 포착 `[{w_sig}]`\n"
+                md_content += f"  - **일봉 (Daily)**:  이평추세 `{d_res['ma_trend'].upper()}` | 파동 `{d_stoch}` | 포착 `[{d_sig}]`\n"
+                md_content += f"  - **4시간봉 (4H)**:  이평추세 `{f_res['ma_trend'].upper()}` | 파동 `{f_stoch}` | 포착 `[{f_sig}]`\n"
+            
+            md_content += "\n"
+            
+            ai_text = item.get('ai_briefing', 'AI 브리핑 생성 누락 또는 제외됨')
+            md_content += f"#### 🤖 로컬 AI 심층 내러티브 분석\n"
+            md_content += f"{ai_text}\n\n"
+            md_content += "---\n"
+            
+    md_content += """
+## ⚠️ 4. 리스크 관리 고지
+- 본 리포트는 알고리즘에 의해 자동 생성된 참고 자료이며, 법적인 투자 권유나 책임의 근거로 사용될 수 없습니다.
+- 제시된 기계적 손절 라인(예: 5일선 또는 20일선 이탈)을 엄격히 준수하여 계좌를 보호하십시오.
+
+---
+**[지표 범례 안내]**
+* **S / M / L**: 각각 단기(5.3.3), 중기(10.5.5), 장기(20.12.12) 스토캐스틱 파동 지표를 의미합니다.
+* **▲ / ▼**: 스토캐스틱 %K가 %D를 상향 돌파(상승 추세)했는지, 하향 이탈(하락 추세)했는지를 나타냅니다.
+"""
+    
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write(md_content)
+        
+    print(f"\n📝 [5단계-A: 리포팅] 일간 종합 분석 리포트 생성 완료: {report_path}")
+    return report_path
+
+
+def format_telegram_message(leading_sectors, sub_theme_results, candidates):
+    """
+    모바일에서 한눈에 보기 편하도록 핵심 시그널만 텔레그램용 문자열로 압축합니다.
+    """
+    strong_buys = [c for c in candidates if "매수" in c.get('signal', '') or "폭발" in c.get('signal', '')]
+    
+    msg = f"🔔 [AI 춘식 MK2 분석 보고]\n"
+    msg += f"📊 지수 스캔: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    
+    msg += f"🏆 주도 섹터 및 탑 테마:\n"
+    for sec in leading_sectors[:2]:
+        theme_str = ""
+        if sub_theme_results and sec in sub_theme_results:
+            top_themes = sub_theme_results[sec]
+            if top_themes:
+                theme_str = f" ({top_themes[0]['theme_name']}: {top_themes[0]['roc_1m']:.1f}%)"
+        msg += f"- {sec}{theme_str}\n"
+        
+    msg += f"🔥 타점 포착 ({len(strong_buys)}개):\n"
+    
+    icon_map = {
+        'Track A': '🌲',
+        'Track B': '🚀',
+        'Track C': '🏛️',
+        'Track D': '💡'
+    }
+    for c in strong_buys:
+        track_icon = icon_map.get(c.get('track', 'Track A'), '🌲')
+        mtf_info = c.get('mtf_analysis')
+        grade_str = f" [{mtf_info['entry_grade']}]" if mtf_info else ""
+        sub_sec_str = f" ({c.get('sub_sector', 'General')})" if c.get('sub_sector') else ""
+        msg += f"- {track_icon} {c['ticker']}{grade_str}{sub_sec_str} ({c.get('signal', '')[:5]} | {c.get('vol_ratio',1.0):.1f}배)\n"
+        
+    msg += f"\n📂 상세 리포트가 생성되었습니다."
+    return msg
+
+
+async def send_telegram_message(message_text):
+    """
+    설정된 봇 토큰과 채팅 ID를 사용하여 텔레그램 메시지를 실제로 전송합니다.
+    """
+    import httpx
+    
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+        print("\n⚠️ 텔레그램 설정이 비어 있어 메시지를 전송하지 않습니다.")
+        return False
+        
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": config.TELEGRAM_CHAT_ID,
+        "text": message_text,
+        "parse_mode": "Markdown"
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                print(f"✅ 텔레그램 알림 발송 성공!")
+                return True
+            else:
+                print(f"❌ 텔레그램 발송 실패 (상태 코드: {resp.status_code}): {resp.text}")
+                return False
+    except Exception as e:
+        print(f"❌ 텔레그램 전송 중 예외 발생: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    sample_secs = ['Technology']
+    sample_cands = [{
+        'ticker': 'AAPL', 
+        'name': 'Apple Inc.', 
+        'signal': '🔥 찐폭발 (강력매수)', 
+        'close': 150.0,
+        'inst_own': 65.0, 
+        'fcf': 5000000, 
+        'vol_ratio': 0.5,
+        'sector': 'Technology',
+        'stoch_summary': 'S:▲ M:▲ L:▲',
+        'ai_briefing': '샘플 텍스트'
+    }]
+    generate_markdown_report(sample_secs, sample_cands)
