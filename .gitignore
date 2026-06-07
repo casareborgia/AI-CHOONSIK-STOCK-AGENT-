@@ -1,6 +1,16 @@
+# Secrets & config
 .env
+config.py
+
+# Local service files (개인 경로/실명 포함)
+com.chunsik.autorun.mk3.plist
+
+# Data & logs
 *.db
 *.log
+run_state.json
+reports/
+
+# System
 __pycache__/
 .DS_Store
-run_state.json

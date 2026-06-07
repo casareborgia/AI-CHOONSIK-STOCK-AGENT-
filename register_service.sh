@@ -16,10 +16,14 @@ echo "✅ start_chunsik.command 실행 권한 설정"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 mkdir -p "$LAUNCH_AGENTS_DIR"
 
-# 3. plist 복사
+# 3. plist 동적 생성 및 복사
 TARGET_PLIST="$LAUNCH_AGENTS_DIR/com.chunsik.autorun.mk3.plist"
-cp com.chunsik.autorun.mk3.plist "$TARGET_PLIST"
-echo "✅ $TARGET_PLIST 복사 완료"
+if [ ! -f "com.chunsik.autorun.mk3.plist.example" ]; then
+    echo "❌ com.chunsik.autorun.mk3.plist.example 파일을 찾을 수 없습니다."
+    exit 1
+fi
+sed "s|__PROJECT_DIR__|$PROJECT_DIR|g" com.chunsik.autorun.mk3.plist.example > "$TARGET_PLIST"
+echo "✅ $TARGET_PLIST 동적 생성 및 복사 완료"
 
 # 4. 기존 서비스 언로드 및 신규 로드
 echo "📡 기존 서비스 등록 해제 및 재등록 실행..."
