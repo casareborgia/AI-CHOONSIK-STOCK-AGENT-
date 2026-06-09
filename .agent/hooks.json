@@ -1,0 +1,56 @@
+[
+  {
+    "hook_type": "pre_tool_call",
+    "tool_name": "run_command",
+    "description": "git commit/push 전 보안 스캔 자동 실행",
+    "condition": "command contains 'git commit' or command contains 'git push'",
+    "action": {
+      "type": "run_script",
+      "command": "python3 .agent/skills/security-harness/scripts/security_scan.py --severity HIGH",
+      "on_failure": "block",
+      "message": "🛡️ HIGH 심각도 보안 이슈가 발견되어 커밋/푸시를 차단합니다. 위 결과를 확인하고 수정 후 다시 시도하세요."
+    }
+  },
+  {
+    "hook_type": "post_tool_call",
+    "tool_name": "write_file",
+    "description": "민감 설정 파일 변경 시 경고",
+    "condition": "file_path matches '(\\.env|config\\.py|secrets?\\.json|\\.pem|\\.key|credentials)$'",
+    "action": {
+      "type": "warn",
+      "message": "🔐 민감 설정 파일이 변경되었습니다. .gitignore에 포함되어 있고 비밀값이 하드코딩되지 않았는지 확인하세요."
+    }
+  },
+  {
+    "hook_type": "post_tool_call",
+    "tool_name": "write_file",
+    "description": "의존성 파일 변경 시 버전 핀 확인",
+    "condition": "file_path matches '(requirements.*\\.txt|package\\.json|go\\.mod|Cargo\\.toml|pom\\.xml)$'",
+    "action": {
+      "type": "warn",
+      "message": "📦 의존성 파일이 변경되었습니다. 모든 패키지에 정확한 버전이 고정되어 있는지 확인하세요."
+    }
+  },
+  {
+    "hook_type": "post_tool_call",
+    "tool_name": "write_file",
+    "description": "Dockerfile/docker-compose 변경 시 보안 알림",
+    "condition": "file_path matches '(Dockerfile|docker-compose|compose\\.ya?ml)$'",
+    "action": {
+      "type": "warn",
+      "message": "🐳 컨테이너 설정이 변경되었습니다. 비밀값이 빌드 인자/이미지에 포함되지 않는지, 베이스 이미지가 고정 태그인지 확인하세요."
+    }
+  },
+  {
+    "hook_type": "pre_tool_call",
+    "tool_name": "run_command",
+    "description": "npm publish / pip upload 전 보안 게이트",
+    "condition": "command contains 'npm publish' or command contains 'twine upload' or command contains 'pip upload'",
+    "action": {
+      "type": "run_script",
+      "command": "python3 .agent/skills/security-harness/scripts/security_scan.py",
+      "on_failure": "block",
+      "message": "📦 패키지 배포 전 보안 스캔에서 이슈가 발견되었습니다. 수정 후 다시 시도하세요."
+    }
+  }
+]

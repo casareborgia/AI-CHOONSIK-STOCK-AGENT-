@@ -16,8 +16,8 @@ from core.ai_verify import call_ollama
 logger = logging.getLogger("ReflectionEngine")
 
 class ReflectionEngine:
-    def __init__(self):
-        pass
+    def __init__(self, concurrency: int = 3):
+        self.semaphore = asyncio.Semaphore(concurrency)
 
     def get_pending_reports(self):
         """성과 평가가 누락되었거나 pending 상태인 보고서 목록을 가져옵니다."""
@@ -31,7 +31,7 @@ class ReflectionEngine:
                 LEFT JOIN outcomes o ON r.id = o.report_id
                 WHERE o.id IS NULL OR o.outcome = 'pending'
                 ORDER BY r.date DESC
-                LIMIT 2
+                LIMIT 15
             """)
             rows = cursor.fetchall()
             return rows
@@ -103,8 +103,9 @@ class ReflectionEngine:
 한국어로 차분하고 전문적인 애널리스트 톤으로 작성하십시오.
 """
             logger.info(f" -> Invoking LLM for reflecting on {ticker}...")
-            # 듀얼 LLM: 성찰은 고도의 추론이 필요하므로 heavy 모델 호출
-            reflection_text = await asyncio.to_thread(call_ollama, prompt, model_type="heavy")
+            # 듀얼 LLM: 성찰은 고도의 추론이 필요하므로 heavy 모델 호출 (동시 호출 한도 제어)
+            async with self.semaphore:
+                reflection_text = await asyncio.to_thread(call_ollama, prompt, model_type="heavy")
             
             # 3. DB Outcomes 및 Learned Rules 저장 (스레드 풀 할당)
             await asyncio.to_thread(
@@ -161,7 +162,7 @@ class ReflectionEngine:
             
             cursor.execute("""
                 INSERT INTO learned_rules (rule_id, rule_text, source, trigger_count, is_active)
-                VALUES (?, ?, 'outcome_analysis', 1, 1)
+                VALUES (?, ?, 'reflection', 1, 1)
                 ON CONFLICT(rule_id) DO UPDATE SET 
                     rule_text = rule_text || '\n' || excluded.rule_text,
                     trigger_count = trigger_count + 1

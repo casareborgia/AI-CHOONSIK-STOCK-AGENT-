@@ -10,7 +10,7 @@ import yfinance as yf
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from agents.base import BaseAgent
-from learning.db import add_or_update_thesis, get_thesis_map, get_all_thesis_maps, delete_thesis_map
+from learning.db import add_or_update_thesis, get_thesis_map, get_all_thesis_maps, delete_thesis_map, get_pending_rules, approve_rule, reject_rule
 from core.thesis_evaluator import generate_initial_thesis_map, evaluate_thesis_change
 from plugins.news_monitor import fetch_recent_news
 
@@ -123,7 +123,12 @@ class TelegramAgent(BaseAgent):
 `/del [티커]` ➡️ 해당 종목을 감시 목록에서 삭제합니다.
 
 📌 *즉시 뉴스/Thesis 감시*
-`/check [티커]` ➡️ 최근 24시간 내 뉴스를 즉시 긁어와 Thesis 변화 평가를 실행합니다."""
+`/check [티커]` ➡️ 최근 24시간 내 뉴스를 즉시 긁어와 Thesis 변화 평가를 실행합니다.
+
+📌 *자가진화 규칙 관리*
+`/rules` ➡️ 대기 중인 진화 규칙 조회
+`/approve [규칙ID]` ➡️ 진화 규칙 활성화 승인
+`/reject [규칙ID]` ➡️ 진화 규칙 삭제 반려"""
             await self.send_response(help_msg)
             
         elif text.startswith("/add"):
@@ -273,3 +278,50 @@ class TelegramAgent(BaseAgent):
             except Exception as e:
                 self.logger.error(f"check 명령어 수행 에러: {e}")
                 await self.send_response(f"❌ [{ticker}] 검사 수행 중 에러 발생: {e}")
+
+        elif text.startswith("/rules"):
+            try:
+                rules = get_pending_rules()
+                if not rules:
+                    await self.send_response("📭 승인 대기 중인 진화 규칙이 없습니다.")
+                    return
+                
+                msg = "📋 *승인 대기 중인 춘식이 자가진화 규칙 목록*\n\n"
+                for r in rules:
+                    msg += f"🔹 *{r['rule_id']}*\n"
+                    msg += f"   - *설명*: {r['rule_text']}\n"
+                    msg += f"   - *날짜*: {r['created_at']}\n"
+                    msg += f"   👉 승인: `/approve {r['rule_id']}` | 반려: `/reject {r['rule_id']}`\n\n"
+                await self.send_response(msg)
+            except Exception as e:
+                await self.send_response(f"❌ 대기 규칙 조회 실패: {e}")
+                
+        elif text.startswith("/approve"):
+            parts = text.split()
+            if len(parts) < 2:
+                await self.send_response("⚠️ 활성화할 규칙 ID를 입력해주세요. 예: `/approve R101`")
+                return
+            rule_id = parts[1].upper()
+            try:
+                success = approve_rule(rule_id)
+                if success:
+                    await self.send_response(f"✅ *규칙 {rule_id}가 활성화되었습니다.* 다음 리포트 검증 시점부터 적용됩니다.")
+                else:
+                    await self.send_response(f"❌ 규칙 {rule_id} 활성화 실패. 존재하지 않는 ID이거나 이미 활성화되었을 수 있습니다.")
+            except Exception as e:
+                await self.send_response(f"❌ 규칙 승인 중 에러 발생: {e}")
+                
+        elif text.startswith("/reject"):
+            parts = text.split()
+            if len(parts) < 2:
+                await self.send_response("⚠️ 반려할 규칙 ID를 입력해주세요. 예: `/reject R101`")
+                return
+            rule_id = parts[1].upper()
+            try:
+                success = reject_rule(rule_id)
+                if success:
+                    await self.send_response(f"🗑️ *규칙 {rule_id}가 반려되어 삭제되었습니다.*")
+                else:
+                    await self.send_response(f"❌ 규칙 {rule_id} 반려 실패. 존재하지 않는 ID일 수 있습니다.")
+            except Exception as e:
+                await self.send_response(f"❌ 규칙 반려 중 에러 발생: {e}")

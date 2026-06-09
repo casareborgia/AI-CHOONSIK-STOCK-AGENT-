@@ -242,9 +242,25 @@ def init_db():
     except Exception as e:
         print(f"⚠️ [DB Migration] outcomes 유니크 인덱스 생성 실패(기존 중복 존재 가능): {e}")
 
+    # 10. system_meta: 시스템 설정 메타데이터 테이블 (자가진화 주기 제어 등)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS system_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # [P1-2] learned_rules 테이블 source 재분류 마이그레이션 (reflection / evolution 의미 분리)
+    try:
+        cursor.execute("UPDATE learned_rules SET source = 'reflection' WHERE rule_id LIKE 'REF_%' OR rule_id LIKE 'T_REF_%'")
+        cursor.execute("UPDATE learned_rules SET source = 'evolution' WHERE (rule_id LIKE 'R%' OR rule_id LIKE 'T_R%') AND source = 'outcome_analysis'")
+    except Exception as e:
+        print(f"⚠️ [DB Migration] learned_rules source 마이그레이션 실패: {e}")
+
     conn.commit()
     conn.close()
-    print("✅ [chunsik_learning.db] 코어 데이터베이스 스키마 구축 완료 (runs/decision_traces 포함).")
+    print("✅ [chunsik_learning.db] 코어 데이터베이스 스키마 구축 완료 (runs/decision_traces/system_meta 포함).")
 
 def save_report_to_db(stock: dict, raw_report: str, revised_report: str, entry_grade: str, run_id: str = None) -> int:
     """최종 분석된 리포트와 퀀트 메타데이터를 DB reports 테이블에 저장하고 생성된 ID를 반환합니다."""
@@ -559,6 +575,96 @@ def delete_graph_edges(source_type: str, source_id: str) -> bool:
         success = True
     except Exception as e:
         print(f"⚠️ [learning/db.py] delete_graph_edges 실패: {e}")
+    finally:
+        conn.close()
+    return success
+
+# system_meta 헬퍼 함수
+def get_system_meta(key: str) -> str:
+    """system_meta 테이블에서 특정 키의 값을 조회합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    val = None
+    try:
+        cursor.execute("SELECT value FROM system_meta WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        if row:
+            val = row[0]
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] get_system_meta 실패: {e}")
+    finally:
+        conn.close()
+    return val
+
+def set_system_meta(key: str, value: str):
+    """system_meta 테이블에 특정 키의 값을 설정/갱신합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO system_meta (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+        """, (key, value))
+        conn.commit()
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] set_system_meta 실패: {e}")
+    finally:
+        conn.close()
+
+# 진화 규칙 승인/조회 헬퍼 함수
+def get_pending_rules() -> list:
+    """승인 대기 중(is_active = 0)인 evolution 규칙 목록을 가져옵니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    results = []
+    try:
+        cursor.execute("""
+            SELECT rule_id, rule_text, source, trigger_count, effectiveness, created_at
+            FROM learned_rules
+            WHERE is_active = 0 AND source = 'evolution'
+            ORDER BY created_at DESC
+        """)
+        rows = cursor.fetchall()
+        keys = ["rule_id", "rule_text", "source", "trigger_count", "effectiveness", "created_at"]
+        for row in rows:
+            results.append(dict(zip(keys, row)))
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] get_pending_rules 실패: {e}")
+    finally:
+        conn.close()
+    return results
+
+def approve_rule(rule_id: str) -> bool:
+    """대기 규칙을 활성화(is_active = 1)로 변경합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    success = False
+    try:
+        cursor.execute("UPDATE learned_rules SET is_active = 1 WHERE rule_id = ?", (rule_id.upper(),))
+        conn.commit()
+        if cursor.rowcount > 0:
+            success = True
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] approve_rule 실패: {e}")
+    finally:
+        conn.close()
+    return success
+
+def reject_rule(rule_id: str) -> bool:
+    """대기 규칙을 DB에서 아예 삭제합니다."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    success = False
+    try:
+        cursor.execute("DELETE FROM learned_rules WHERE rule_id = ?", (rule_id.upper(),))
+        conn.commit()
+        if cursor.rowcount > 0:
+            success = True
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] reject_rule 실패: {e}")
     finally:
         conn.close()
     return success

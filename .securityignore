@@ -1,0 +1,10 @@
+# Chunsik MK3 Security Ignore Settings
+
+.agent/
+.venv/
+venv/
+__pycache__/
+*.log
+*.pyc
+.git/
+.DS_Store

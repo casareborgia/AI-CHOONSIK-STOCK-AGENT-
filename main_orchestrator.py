@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sys
 import time
+from datetime import datetime, timedelta
 
 from message_bus.broker import MessageBroker
 from agents.market_agent import MarketAgent
@@ -48,6 +49,44 @@ async def main():
         await reflection_engine.run_reflection_batch()
     else:
         logger.info("⏭️ Deferred Reflection Engine skipped by user flag.")
+
+    # [P1-1] 규칙 자가진화(Weekly Rule Evolution) 구동
+    skip_evolution = "--skip-evolution" in sys.argv
+    force_evolution = "--force-evolution" in sys.argv
+
+    if not skip_evolution:
+        from learning.db import get_system_meta, set_system_meta
+        from learning.rule_evolution import run_weekly_evolution
+
+        # 마지막 진화 일자 확인
+        last_run_str = get_system_meta("last_evolution_run")
+        should_run = False
+
+        if force_evolution:
+            logger.info("⚡ Force-evolution flag detected. Running rule evolution...")
+            should_run = True
+        elif not last_run_str:
+            logger.info("No record of prior rule evolution. Initiating first run...")
+            should_run = True
+        else:
+            try:
+                last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d")
+                if datetime.now() - last_run_dt >= timedelta(days=7):
+                    should_run = True
+            except Exception as e:
+                logger.warning(f"Failed to parse last_evolution_run ({last_run_str}): {e}")
+                should_run = True
+
+        if should_run:
+            logger.info("Running Weekly Rule Evolution...")
+            try:
+                await asyncio.to_thread(run_weekly_evolution)
+                # 성공 시 마지막 진화 일자 갱신
+                set_system_meta("last_evolution_run", datetime.now().strftime("%Y-%m-%d"))
+            except Exception as e:
+                logger.error(f"Rule evolution failed: {e}")
+        else:
+            logger.info("⏭️ Weekly Rule Evolution skipped (run interval < 7 days).")
 
     # 1. 메시지 브로커 생성
     broker = MessageBroker()

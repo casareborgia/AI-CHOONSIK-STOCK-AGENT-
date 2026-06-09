@@ -98,7 +98,7 @@ def save_learned_rule(rule_id: str, rule_text: str, check_condition: str) -> boo
         cursor.execute("""
             INSERT INTO learned_rules (rule_id, rule_text, source, trigger_count, effectiveness, is_active)
             VALUES (?, ?, ?, 0, 0.0, 0)
-        """, (rule_id, f"[{check_condition}] -> {rule_text}", "outcome_analysis"))
+        """, (rule_id, f"[{check_condition}] -> {rule_text}", "evolution"))
         conn.commit()
         print(f"   💾 [rule_evolution.py] AI 진화 규칙 {rule_id}가 승인 대기 상태(is_active=0)로 DB에 안전 적재되었습니다!")
         conn.close()

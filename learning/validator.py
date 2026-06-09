@@ -39,7 +39,7 @@ def load_active_learned_rules() -> list[dict]:
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT rule_id, rule_text FROM learned_rules WHERE is_active = 1")
+    cursor.execute("SELECT rule_id, rule_text FROM learned_rules WHERE is_active = 1 AND source = 'evolution'")
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
