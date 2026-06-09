@@ -28,7 +28,7 @@ class TestReflectionEngine(unittest.TestCase):
         # 1. 가상의 테스트용 report 레코드 삽입 (이미 존재하는 테이블 활용)
         # 만약 outcomes에 이 report_id에 매칭되는 데이터가 없으면 pending으로 간주됨
         cls.test_ticker = "T_REF_TEST"
-        cls.test_date = datetime.now().strftime("%Y-%m-%d")
+        cls.test_date = "2099-12-31"
         
         cursor.execute("""
             INSERT INTO reports (date, ticker, sector, signal_label, close_price, report_text)
@@ -58,6 +58,8 @@ class TestReflectionEngine(unittest.TestCase):
             check_date=self.test_date,
             check_price=105.5,
             return_pct=5.5,
+            benchmark_return_pct=1.0,
+            alpha_return_pct=4.5,
             outcome="win",
             reflection=test_reflection
         )

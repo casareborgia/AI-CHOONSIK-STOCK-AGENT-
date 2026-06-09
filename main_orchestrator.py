@@ -13,6 +13,7 @@ from agents.reporter_agent import ReporterAgent
 # from agents.telegram_agent import TelegramAgent
 from agents.thesis_agent import ThesisAgent
 from learning.reflection_engine import ReflectionEngine
+from learning.outcome_tracker import track_outcomes
 
 # 루트 로거 설정
 logging.basicConfig(
@@ -34,6 +35,14 @@ async def main():
     # 0. 지연 성찰(Deferred Reflection) 배치 구동 (사후 성과 추적)
     skip_reflection = "--skip-reflection" in sys.argv
     if not skip_reflection:
+        # [P0] 성과 추적 배선 복구: 5/10/20영업일 정밀 성과를 먼저 집계한 뒤 성찰을 수행한다.
+        # (track_outcomes는 그동안 정의만 되어 있고 호출되지 않아 10/20일 성과가 누락되어 있었음)
+        logger.info("Tracking outcomes for past reports (5/10/20 business days)...")
+        try:
+            await asyncio.to_thread(track_outcomes)
+        except Exception as e:
+            logger.error(f"track_outcomes failed (continuing): {e}")
+
         logger.info("Starting Deferred Reflection Engine...")
         reflection_engine = ReflectionEngine()
         await reflection_engine.run_reflection_batch()

@@ -176,11 +176,77 @@ def init_db():
             default_valuations
         )
     
+    # 8. runs: 실행 세션 헤더 (퍼널 요약 및 실행 메타)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS runs (
+        run_id TEXT PRIMARY KEY,             -- 실행 세션 ID (YYYYMMDD_HHMMSS)
+        started_at TEXT,                     -- 시작 시각 (ISO8601)
+        finished_at TEXT,                    -- 종료 시각 (ISO8601)
+        trigger TEXT,                        -- 'manual' | 'open' | 'close'
+        leading_sectors TEXT,                -- JSON: 주도 섹터 목록
+        n_signals INTEGER,                   -- 기술분석 통과(시그널) 종목 수
+        n_picks INTEGER,                     -- 최종 AI 검증 통과 종목 수
+        status TEXT,                         -- 'success' | 'failed'
+        elapsed_sec REAL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 9. decision_traces: 모든 후보의 의사결정 근거 전체값 + 퍼널 단계 (재현/감사용)
+    #    파동에너지 판정의 중간 계산값(스토캐스틱 K/D, 이평 국면, 거래량 배수)을 보존한다.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS decision_traces (
+        run_id TEXT NOT NULL,
+        ticker TEXT NOT NULL,
+        track TEXT,                          -- Track A/B/C/D
+        -- 펀더멘털
+        pe REAL, peg REAL, inst_own REAL, beta REAL, sector TEXT,
+        -- 이평 국면 (technical_engine)
+        regime TEXT,                         -- 'aligned'|'reversed'|'converged'|'mixed'
+        ma5 REAL, ma20 REAL, ma60 REAL, ma120 REAL,
+        -- 3중 스토캐스틱 파동에너지 원천값 (소 5.3.3 / 중 10.5.5 / 대 20.12.12)
+        stoch_s_k REAL, stoch_s_d REAL,
+        stoch_m_k REAL, stoch_m_d REAL,
+        stoch_l_k REAL, stoch_l_d REAL,
+        s_rising INTEGER, m_rising INTEGER, l_rising INTEGER,
+        -- 거래량
+        vol_ratio REAL, vol_multiplier REAL, is_vol_surge INTEGER,
+        -- 판정
+        close REAL, signal_label TEXT,
+        mtf_entry_grade TEXT,
+        -- 퍼널 추적
+        stage_reached TEXT,                  -- 'technical' | 'verified'
+        ai_verified INTEGER,                 -- 최종 리포트(AI검증)까지 도달했는가
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (run_id, ticker)
+    );
+    """)
+
+    # reports.run_id 컬럼 마이그레이션 (실행 세션 ↔ 리포트 연결)
+    cursor.execute("PRAGMA table_info(reports)")
+    report_cols = [col[1] for col in cursor.fetchall()]
+    if "run_id" not in report_cols:
+        try:
+            cursor.execute("ALTER TABLE reports ADD COLUMN run_id TEXT")
+            print("💾 [DB Migration] reports 테이블에 run_id 컬럼이 추가되었습니다.")
+        except Exception as e:
+            print(f"⚠️ [DB Migration] run_id 추가 실패: {e}")
+
+    # outcomes 무결성: (report_id, days_elapsed) 중복 적재 방지 인덱스
+    # (track_outcomes 복구 시 reflection과의 5일 outcome 중복/라벨 충돌을 차단)
+    try:
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_outcomes_report_interval "
+            "ON outcomes(report_id, days_elapsed)"
+        )
+    except Exception as e:
+        print(f"⚠️ [DB Migration] outcomes 유니크 인덱스 생성 실패(기존 중복 존재 가능): {e}")
+
     conn.commit()
     conn.close()
-    print("✅ [chunsik_learning.db] 6대 코어 데이터베이스 스키마 구축 완료.")
+    print("✅ [chunsik_learning.db] 코어 데이터베이스 스키마 구축 완료 (runs/decision_traces 포함).")
 
-def save_report_to_db(stock: dict, raw_report: str, revised_report: str, entry_grade: str) -> int:
+def save_report_to_db(stock: dict, raw_report: str, revised_report: str, entry_grade: str, run_id: str = None) -> int:
     """최종 분석된 리포트와 퀀트 메타데이터를 DB reports 테이블에 저장하고 생성된 ID를 반환합니다."""
     conn = get_connection()
     cursor = conn.cursor()
@@ -210,17 +276,101 @@ def save_report_to_db(stock: dict, raw_report: str, revised_report: str, entry_g
     cursor.execute("""
         INSERT INTO reports (
             date, ticker, sector, signal_label, entry_grade, pe_ratio, peg_ratio, 
-            inst_ownership, close_price, target_price, stop_loss_pct, report_text, revised_text
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            inst_ownership, close_price, target_price, stop_loss_pct, report_text, revised_text, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         today_str, ticker, sector, signal, entry_grade, pe, peg, 
-        inst_own, close, target_price, stop_pct, raw_report, revised_report
+        inst_own, close, target_price, stop_pct, raw_report, revised_report, run_id
     ))
     
     report_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return report_id
+
+def save_run(run_id: str, started_at: str, finished_at: str, trigger: str,
+             leading_sectors, n_signals: int, n_picks: int, status: str, elapsed_sec: float):
+    """실행 세션 1건의 퍼널 요약을 runs 테이블에 적재(또는 갱신)합니다."""
+    import json
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO runs (run_id, started_at, finished_at, trigger, leading_sectors,
+                              n_signals, n_picks, status, elapsed_sec)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                finished_at = excluded.finished_at,
+                n_signals = excluded.n_signals,
+                n_picks = excluded.n_picks,
+                status = excluded.status,
+                elapsed_sec = excluded.elapsed_sec
+        """, (
+            run_id, started_at, finished_at, trigger,
+            json.dumps(leading_sectors, ensure_ascii=False) if leading_sectors is not None else None,
+            n_signals, n_picks, status, elapsed_sec
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] save_run 실패: {e}")
+    finally:
+        conn.close()
+
+def save_decision_traces(run_id: str, signals: list, verified_tickers: set):
+    """
+    기술분석을 통과한 '모든' 후보(생존+탈락 무관)의 의사결정 근거를 decision_traces에 적재합니다.
+    - signals: TechnicalAgent가 생성한 시그널 dict 리스트 (raw 스토캐스틱/이평/거래량 값 포함)
+    - verified_tickers: 최종 AI 검증(리포트)까지 도달한 티커 집합
+    """
+    if not signals:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        for it in signals:
+            ticker = it.get("ticker", "UNKNOWN")
+            mtf = it.get("mtf_analysis") if isinstance(it.get("mtf_analysis"), dict) else {}
+            is_verified = 1 if ticker in verified_tickers else 0
+            cursor.execute("""
+                INSERT INTO decision_traces (
+                    run_id, ticker, track, pe, peg, inst_own, beta, sector, regime,
+                    ma5, ma20, ma60, ma120,
+                    stoch_s_k, stoch_s_d, stoch_m_k, stoch_m_d, stoch_l_k, stoch_l_d,
+                    s_rising, m_rising, l_rising,
+                    vol_ratio, vol_multiplier, is_vol_surge,
+                    close, signal_label, mtf_entry_grade, stage_reached, ai_verified
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id, ticker) DO UPDATE SET
+                    ai_verified = excluded.ai_verified,
+                    stage_reached = excluded.stage_reached,
+                    signal_label = excluded.signal_label,
+                    mtf_entry_grade = excluded.mtf_entry_grade
+            """, (
+                run_id, ticker, it.get("track"),
+                it.get("pe"), it.get("peg"), it.get("inst_own"), it.get("beta"),
+                it.get("disp_sector", it.get("sector")),
+                it.get("regime"),
+                it.get("ma5"), it.get("ma20"), it.get("ma60"), it.get("ma120"),
+                it.get("stoch_s_k"), it.get("stoch_s_d"),
+                it.get("stoch_m_k"), it.get("stoch_m_d"),
+                it.get("stoch_l_k"), it.get("stoch_l_d"),
+                int(bool(it.get("s_rising"))) if it.get("s_rising") is not None else None,
+                int(bool(it.get("m_rising"))) if it.get("m_rising") is not None else None,
+                int(bool(it.get("l_rising"))) if it.get("l_rising") is not None else None,
+                it.get("vol_ratio"), it.get("vol_multiplier"),
+                int(bool(it.get("is_vol_surge"))) if it.get("is_vol_surge") is not None else None,
+                it.get("close"), it.get("signal"),
+                mtf.get("entry_grade"),
+                "verified" if is_verified else "technical",
+                is_verified
+            ))
+        conn.commit()
+        print(f"   🧾 [decision_traces] {len(signals)}개 후보의 의사결정 근거 적재 완료 (run_id={run_id}).")
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] save_decision_traces 실패: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 def save_validation_results(report_id: int, violations: list[dict], auto_fixed: bool):
     """검증 오류 내역을 DB validations 테이블에 저장합니다."""
