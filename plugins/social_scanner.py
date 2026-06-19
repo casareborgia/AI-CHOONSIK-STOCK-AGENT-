@@ -129,21 +129,128 @@ def fetch_reddit_wsb_json():
         return []
 
 
+def fetch_toss_popular_shares() -> list:
+    """
+    [1차 방어선 - 국내] 토스증권 웹 사이트(tossinvest.com/shares)에서 실시간 인기 미국 주식을 스크래핑합니다.
+    Next.js __NEXT_DATA__ JSON 파싱과 HTML 내 /shares/[TICKER] 하이퍼링크 정규식 매칭을 결합한 이중 안전 설계를 가집니다.
+    """
+    url = "https://tossinvest.com/shares"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+    }
+    req = urllib.request.Request(url, headers=headers)
+    
+    candidates = []
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html = response.read().decode('utf-8')
+            
+            tickers = []
+            
+            # 1. Next.js __NEXT_DATA__ JSON 추출 시도
+            next_data_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.DOTALL)
+            if next_data_match:
+                try:
+                    json_data = json.loads(next_data_match.group(1))
+                    
+                    # JSON 내부에서 재귀적으로 문자열 패턴 검색을 하여 티커 리스트를 안전히 수집
+                    def find_tickers_in_json(obj):
+                        found = []
+                        if isinstance(obj, dict):
+                            for k, v in obj.items():
+                                if k in ['symbol', 'ticker'] and isinstance(v, str) and v.isupper() and 1 <= len(v) <= 5:
+                                    found.append(v)
+                                else:
+                                    found.extend(find_tickers_in_json(v))
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                found.extend(find_tickers_in_json(item))
+                        return found
+                    
+                    json_tickers = find_tickers_in_json(json_data)
+                    for t in json_tickers:
+                        if t.isalpha() and 2 <= len(t) <= 5:
+                            tickers.append(t)
+                except Exception as je:
+                    print(f"⚠️ Toss Next.js JSON 파싱 중 예외 (정규식 폴백 작동): {je}")
+            
+            # 2. 이중 안전 장치: 하이퍼링크 패턴 (/shares/[TICKER]) 정규식 추출
+            link_tickers = re.findall(r'/shares/([A-Z]{2,5})\b', html)
+            tickers.extend(link_tickers)
+            
+            # 3. 중복 제거 (순서 보장)
+            unique_tickers = []
+            seen = set()
+            blacklist = {'FAQ', 'BLOG', 'HOME', 'WTS', 'WTS-API'}
+            for t in tickers:
+                if t not in seen and t not in blacklist:
+                    seen.add(t)
+                    unique_tickers.append(t)
+            
+            # 4. 야후 파이낸스 교차 검증을 통해 실존 유효 미국 주식만 엄선
+            count = 0
+            base_mentions = 200  # 토스 인기 1위는 높은 멘션 가중치 부여
+            for t in unique_tickers:
+                try:
+                    info = get_cached_ticker_info(t)
+                    if info and 'shortName' in info:
+                        currency = info.get('currency', 'USD')
+                        if currency != 'USD':
+                            continue  # 미국 주식 트랙이므로 원화 시세 종목 제외
+                            
+                        candidates.append({
+                            'ticker': t,
+                            'name': info.get('shortName', t),
+                            'mentions': base_mentions - (count * 20),
+                            'sector': info.get('sector', 'Social Momentum (Toss)'),
+                            'track': 'Track B'
+                        })
+                        count += 1
+                        if count >= 5:  # 상위 5개 알짜 주식만 선정
+                            break
+                except Exception:
+                    continue
+                    
+    except Exception as e:
+        print(f"⚠️ Toss 인기 주식 스크래핑 예외 발생: {e}")
+        
+    return candidates
+
+
 async def get_social_candidates():
     """
     비동기 방식으로 실시간 커뮤니티 모멘텀 핵심 종목을 수집합니다.
+    (StockTwits + Reddit + Toss 실시간 인기검색 데이터 하이브리드 병합)
     """
     print("\n🌐 [Track B: SNS 스캔] 실시간 소셜 모멘텀 핫티커 비동기 탐색 중...")
     
-    cands = await asyncio.to_thread(fetch_stocktwits_trending)
+    # 3개 소스 병렬 수집
+    toss_task = asyncio.to_thread(fetch_toss_popular_shares)
+    st_task = asyncio.to_thread(fetch_stocktwits_trending)
+    reddit_task = asyncio.to_thread(fetch_reddit_wsb_json)
+    
+    results = await asyncio.gather(toss_task, st_task, reddit_task, return_exceptions=True)
+    
+    toss_cands = results[0] if not isinstance(results[0], Exception) and results[0] else []
+    st_cands = results[1] if not isinstance(results[1], Exception) and results[1] else []
+    reddit_cands = results[2] if not isinstance(results[2], Exception) and results[2] else []
+    
+    # 병합 (중복 제거 및 언급량 가점 결합)
+    merged_dict = {}
+    
+    for item in (toss_cands + st_cands + reddit_cands):
+        ticker = item['ticker']
+        if ticker not in merged_dict:
+            merged_dict[ticker] = item.copy()
+        else:
+            merged_dict[ticker]['mentions'] += item['mentions']
+            
+    cands = list(merged_dict.values())
     
     if not cands:
-        print("🔄 StockTwits 데이터 확보 지연. 2차 방어선(Reddit JSON 파싱) 스위칭...")
-        cands = await asyncio.to_thread(fetch_reddit_wsb_json)
-        
-    if not cands:
         print("🔄 실시간 통신 타임아웃. 3차 방어선(정제된 핵심 밈 풀) 가동...")
-        # [Fallback 완벽 정화] VG, BBBY 등 쓰레기/일반/상폐 종목 완전 제거 후 최우량 밈 종목만 등재
         cands = [
             {'ticker': 'PLTR', 'name': 'Palantir Technologies Inc.', 'mentions': 120, 'sector': 'Technology', 'track': 'Track B'},
             {'ticker': 'TSLA', 'name': 'Tesla Inc.', 'mentions': 110, 'sector': 'Consumer Cyclical', 'track': 'Track B'},
@@ -156,6 +263,7 @@ async def get_social_candidates():
     max_cands = config.SNS_PRESETS.get('max_candidates', 5)
     
     filtered = [c for c in cands if c['mentions'] >= min_mentions]
+    filtered.sort(key=lambda x: x['mentions'], reverse=True)
     results = filtered[:max_cands]
     
     print(f"✅ [Track B 완료] 총 {len(results)}개 실시간 SNS 모멘텀 핫티커 확보 성공.")
@@ -200,7 +308,6 @@ def fetch_target_stocktwits_sentiment(ticker: str, limit: int = 15) -> dict:
                 result["bullish_pct"] = round((bull_cnt / total) * 100, 1)
     except Exception as e:
         print(f"⚠️ StockTwits {ticker} 상세 감성 분석 실패 (보안 차단 대비 Mock-up 스위칭): {e}")
-        # [Fallback 완벽 가동] 통신 차단에 대비한 티커 맞춤형 고품질 폴백 데이터
         result = {
             "bullish_pct": 62.8,
             "total_count": 35,
@@ -254,7 +361,6 @@ def fetch_target_reddit_sentiment(ticker: str, subreddits=("wallstreetbets", "st
         except Exception as e:
             print(f"⚠️ Reddit r/{sub} {ticker} 상세 검색 실패 (보안 차단 대비 Mock-up 스위칭): {e}")
 
-    # 모든 서브레딧에서 수집에 실패하거나 차단된 경우, 고품질 폴백 데이터 채움
     if not posts_collected:
         posts_collected = [
             {
@@ -285,7 +391,6 @@ if __name__ == "__main__":
     for r in res:
         print(r)
         
-    # 타겟 상세 수집 테스트
     print("\n--- Target Ticker (AAPL) Social Detail Sentiment Test ---")
     st_res = fetch_target_stocktwits_sentiment("AAPL")
     print(f"StockTwits AAPL Bullish %: {st_res['bullish_pct']}% (Total: {st_res['total_count']})")
