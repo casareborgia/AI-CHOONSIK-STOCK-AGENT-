@@ -19,6 +19,20 @@ class MessageBroker:
         # channel_name -> list of asyncio.Queue
         self._subscribers: Dict[str, List[asyncio.Queue]] = {}
         self._lock = asyncio.Lock()
+        self._shared_memory: Dict[str, Any] = {}
+        self._memory_lock = asyncio.Lock()
+
+    async def put_payload(self, key: str, data: Any) -> str:
+        """대용량 데이터를 공유 메모리에 저장하고 참조 식별자(태그)를 반환합니다."""
+        async with self._memory_lock:
+            tag = f"#payload:{key}"
+            self._shared_memory[tag] = data
+            return tag
+
+    async def get_payload(self, tag: str) -> Any:
+        """참조 식별자(태그)를 사용해 공유 메모리에서 데이터를 조회합니다."""
+        async with self._memory_lock:
+            return self._shared_memory.get(tag)
 
     async def subscribe(self, channel: str, queue: asyncio.Queue):
         """

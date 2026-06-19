@@ -10,6 +10,9 @@ from agents.base import BaseAgent
 from core.ai_verify import run_ai_verification
 from learning.validator import validate_report, auto_fix_report
 from plugins.social_scanner import fetch_target_stocktwits_sentiment, fetch_target_reddit_sentiment
+from core.thesis_evaluator import generate_criticism
+from core.toss_client import toss_client
+from core.technical_engine import evaluate_signal
 
 class CriticAgent(BaseAgent):
     """
@@ -40,8 +43,9 @@ class CriticAgent(BaseAgent):
 
     async def start(self):
         await super().start()
-        # 기술 시그널 분석 완료 채널 구독
+        # 기술 시그널 분석 완료 채널 및 디베이트 요청 채널 구독
         await self.subscribe("technical/signals_analyzed")
+        await self.subscribe("thesis/debate_request")
 
     async def handle_message(self, channel: str, message: Any):
         if channel == "technical/signals_analyzed":
@@ -113,3 +117,64 @@ class CriticAgent(BaseAgent):
 
             except Exception as e:
                 self.logger.error(f"Error in CriticAgent processing: {e}", exc_info=True)
+        elif channel == "thesis/debate_request":
+            await self.handle_debate_request(message)
+
+    async def handle_debate_request(self, message: dict):
+        """ThesisAgent의 1차 투자 Thesis 평가 결과와 기술 지표를 검증하여 비판(Criticism) 피드백 회신"""
+        ticker = message.get("ticker")
+        payload_tag = message.get("payload_tag")
+        turn = message.get("turn", 0)
+
+        if turn != 1:
+            return
+
+        self.logger.info(f"📥 [{ticker}] ThesisAgent로부터 디베이트 요청 수신 (Turn 1). 비판적 검증 수행 중...")
+
+        try:
+            # 1. Shared Memory에서 1차 평가 결과 조회
+            payload_data = await self.broker.get_payload(payload_tag)
+            if not payload_data:
+                self.logger.error(f"공유 메모리에서 페이로드를 찾을 수 없습니다: {payload_tag}")
+                return
+
+            initial_eval = payload_data["initial_evaluation"]
+
+            # 2. 실시간 기술 지표 조회 (토스 API 캔들 조회 -> evaluate_signal 연산)
+            self.logger.info(f"📊 [{ticker}] 디베이트 검증용 실시간 기술 지표 수집 및 분석 시작...")
+            tech_info = {}
+            try:
+                # 150봉 로드
+                df = await asyncio.to_thread(toss_client.get_candles, ticker, interval="1d", count=150)
+                eval_res = await asyncio.to_thread(evaluate_signal, df, {"ticker": ticker})
+                if eval_res:
+                    tech_info = eval_res
+            except Exception as toss_err:
+                self.logger.warning(f"⚠️ [{ticker}] 디베이트용 실시간 기술 지표 획득 실패 ({toss_err}). 기본 피드백 적용.")
+                tech_info = {
+                    "regime": "mixed",
+                    "signal": "관망 (지표 수집 누락)",
+                    "vol_ratio": 1.0,
+                    "stoch_summary": "N/A"
+                }
+
+            # 3. 비판 보고서 작성 (LLM 호출)
+            criticism_text = await asyncio.to_thread(
+                generate_criticism, ticker, initial_eval, tech_info
+            )
+
+            # 4. 결과 업데이트 및 Shared Memory 갱신
+            payload_data["criticism"] = criticism_text
+            await self.broker.put_payload(f"debate:{ticker}", payload_data)
+
+            # 5. 디베이트 응답 전송 (Turn 2)
+            debate_response = {
+                "ticker": ticker,
+                "payload_tag": payload_tag,
+                "turn": 2
+            }
+            self.logger.info(f"📤 [{ticker}] 디베이트 비판 피드백 작성 완료. 응답 발행 중 (Turn 2)...")
+            await self.publish("critic/debate_response", debate_response)
+
+        except Exception as e:
+            self.logger.error(f"디베이트 검증 처리 중 오류 발생: {e}", exc_info=True)

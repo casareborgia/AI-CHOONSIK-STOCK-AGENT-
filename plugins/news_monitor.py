@@ -4,8 +4,8 @@ import logging
 
 logger = logging.getLogger("NewsMonitor")
 
-# 최근 처리된 뉴스 uuid를 임시 보관하는 인메모리 캐시 (중복 알림 방지)
-_processed_news_uuids = set()
+# 최근 처리된 뉴스 uuid를 임시 보관하는 인메모리 캐시 (중복 알림 방지, DoS 방지를 위한 크기 제한 dict)
+_processed_news_uuids = {}
 
 # Thesis 변동과 무관한 단순 노이즈성 뉴스 제목 키워드 (소문자 기준 매칭)
 NOISE_KEYWORDS = [
@@ -83,4 +83,8 @@ def fetch_recent_news(ticker: str, hours: int = 24) -> list:
 def mark_news_as_processed(uuid: str):
     """뉴스가 성공적으로 알림 처리되었을 때 중복 방지 캐시에 등록합니다."""
     global _processed_news_uuids
-    _processed_news_uuids.add(uuid)
+    _processed_news_uuids[uuid] = True
+    # 캐시 크기 제한 (최대 1000개 유지하여 메모리 누수 방지)
+    if len(_processed_news_uuids) > 1000:
+        first_key = next(iter(_processed_news_uuids))
+        _processed_news_uuids.pop(first_key, None)

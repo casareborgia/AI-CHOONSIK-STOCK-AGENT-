@@ -20,6 +20,7 @@ import yfinance as yf
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import config
 from core.sector_monitor import compute_stochastic_tv
+from core.toss_client import toss_client
 
 logger = logging.getLogger("TechnicalEngine")
 
@@ -166,15 +167,30 @@ def analyze_technical_signals(candidates):
     for item in candidates:
         ticker = item['ticker']
         track = item.get('track', 'Track A')
+        df = None
+        
+        # 1차 시도: 토스증권 API로 데이터 로드 (120일선 연산을 위해 150개 봉 로드)
         try:
-            stock = yf.Ticker(ticker)
-            # 120일 이평선 및 대파동 계산을 위해 6개월치 데이터 로드
-            df = stock.history(period="6mo")
+            df = toss_client.get_candles(ticker, interval="1d", count=150)
+            logger.info(f"📊 [Toss API] {ticker} 일봉 {len(df)}개 로드 완료.")
+        except Exception as toss_err:
+            logger.warning(f"⚠️ [Toss API] {ticker} 로드 실패 ({toss_err}). yfinance 폴백 작동...")
+            
+        # 2차 시도 (폴백): 기존 yfinance 로드
+        if df is None or df.empty:
+            try:
+                stock = yf.Ticker(ticker)
+                df = stock.history(period="6mo")
+                logger.info(f"📈 [yfinance] {ticker} 일봉 {len(df)}개 로드 완료.")
+            except Exception as yf_err:
+                logger.error(f"❌ [yfinance] {ticker} 로드 최종 실패: {yf_err}")
+                continue
 
+        try:
             result_item = evaluate_signal(df, item, track)
             if result_item is None:
                 # [P0] 데이터 부족으로 스킵된 종목을 조용히 버리지 않고 명시적으로 로깅
-                logger.warning(f"[Skip] {ticker}: 데이터 부족(len<40) 또는 빈 데이터프레임으로 분석 제외.")
+                logger.warning(f"[Skip] {ticker}: 데이터 부족(len<120) 또는 빈 데이터프레임으로 분석 제외.")
                 continue
 
             signal_results.append(result_item)

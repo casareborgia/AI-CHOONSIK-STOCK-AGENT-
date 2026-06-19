@@ -23,6 +23,16 @@ def is_valid_ticker(ticker: str) -> bool:
     return bool(TICKER_RE.match(ticker))
 
 
+def escape_markdown(text: str) -> str:
+    """텔레그램 Markdown V1용 특수문자 이스케이프 헬퍼."""
+    if not text:
+        return ""
+    for c in ["_", "*", "[", "`"]:
+        text = text.replace(c, f"\\{c}")
+    return text
+
+
+
 class TelegramAgent(BaseAgent):
     """
     텔레그램 사용자 입력을 실시간으로 수신하고 처리하는 리스너 에이전트.
@@ -174,22 +184,22 @@ class TelegramAgent(BaseAgent):
                 success = add_or_update_thesis(ticker, company_name, thesis_data)
                 
                 if success:
-                    res_text = f"✨ *[{ticker} / {company_name}] Thesis Map 빌드 및 감시 등록 완료!*\n\n"
-                    res_text += f"▪️ *투자 thesis*: {thesis_data['investment_thesis']}\n"
-                    res_text += f"▪️ *핵심 지표*: {thesis_data['key_indicators']}\n"
-                    res_text += f"▪️ *주요 촉매*: {thesis_data['catalysts']}\n"
-                    res_text += f"▪️ *주요 리스크*: {thesis_data['risks']}\n"
-                    res_text += f"▪️ *kill condition*: {thesis_data['kill_condition']}\n"
-                    res_text += f"▪️ *무시해도 되는 잡뉴스*: {thesis_data['noise_rules']}\n"
-                    res_text += f"▪️ *실적 체크포인트*: {thesis_data['earnings_checkpoints']}\n"
-                    res_text += f"▪️ *valuation 기준*: {thesis_data['valuation_criteria']}\n"
-                    res_text += f"▪️ *한 줄 결론*: {thesis_data['one_line_conclusion']}"
+                    res_text = f"✨ *[{ticker} / {escape_markdown(company_name)}] Thesis Map 빌드 및 감시 등록 완료!*\n\n"
+                    res_text += f"▪️ *투자 thesis*: {escape_markdown(thesis_data['investment_thesis'])}\n"
+                    res_text += f"▪️ *핵심 지표*: {escape_markdown(thesis_data['key_indicators'])}\n"
+                    res_text += f"▪️ *주요 촉매*: {escape_markdown(thesis_data['catalysts'])}\n"
+                    res_text += f"▪️ *주요 리스크*: {escape_markdown(thesis_data['risks'])}\n"
+                    res_text += f"▪️ *kill condition*: {escape_markdown(thesis_data['kill_condition'])}\n"
+                    res_text += f"▪️ *무시해도 되는 잡뉴스*: {escape_markdown(thesis_data['noise_rules'])}\n"
+                    res_text += f"▪️ *실적 체크포인트*: {escape_markdown(thesis_data['earnings_checkpoints'])}\n"
+                    res_text += f"▪️ *valuation 기준*: {escape_markdown(thesis_data['valuation_criteria'])}\n"
+                    res_text += f"▪️ *한 줄 결론*: {escape_markdown(thesis_data['one_line_conclusion'])}"
                     await self.send_response(res_text)
                 else:
                     await self.send_response(f"❌ [{ticker}] DB 저장에 실패했습니다.")
             except Exception as e:
-                self.logger.error(f"add 명령어 수행 에러: {e}")
-                await self.send_response(f"❌ [{ticker}] Thesis Map 생성 중 에러 발생: {e}")
+                self.logger.error(f"add 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response(f"❌ [{ticker}] Thesis Map 생성 중 내부 오류가 발생했습니다. 로그를 확인해주세요.")
                 
         elif text.startswith("/save"):
             body = text[5:].strip()
@@ -225,7 +235,8 @@ class TelegramAgent(BaseAgent):
                 else:
                     await self.send_response(f"❌ [{ticker}] 수동 Thesis Map 저장 실패.")
             except Exception as e:
-                await self.send_response(f"❌ [{ticker}] Thesis 저장 중 에러 발생: {e}")
+                self.logger.error(f"save 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response(f"❌ [{ticker}] Thesis 저장 중 내부 오류가 발생했습니다.")
                 
         elif text.startswith("/list"):
             try:
@@ -236,11 +247,12 @@ class TelegramAgent(BaseAgent):
                     
                 msg = "📋 *현재 밀착 감시 중인 보유 종목 목록*\n\n"
                 for idx, item in enumerate(maps, 1):
-                    msg += f"{idx}. *{item['ticker']}* ({item['name']})\n"
-                    msg += f"   └ *결론*: {item['one_line_conclusion']}\n\n"
+                    msg += f"{idx}. *{item['ticker']}* ({escape_markdown(item['name'])})\n"
+                    msg += f"   └ *결론*: {escape_markdown(item['one_line_conclusion'])}\n\n"
                 await self.send_response(msg)
             except Exception as e:
-                await self.send_response(f"❌ 목록 조회 중 오류 발생: {e}")
+                self.logger.error(f"list 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response("❌ 목록 조회 중 내부 오류가 발생했습니다.")
                 
         elif text.startswith("/del"):
             parts = text.split()
@@ -258,7 +270,8 @@ class TelegramAgent(BaseAgent):
                 else:
                     await self.send_response(f"⚠️ [{ticker}] 감시 목록에 등록되어 있지 않거나 삭제에 실패했습니다.")
             except Exception as e:
-                await self.send_response(f"❌ 삭제 중 오류 발생: {e}")
+                self.logger.error(f"del 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response(f"❌ [{ticker}] 삭제 중 내부 오류가 발생했습니다.")
                 
         elif text.startswith("/check"):
             parts = text.split()
@@ -293,8 +306,8 @@ class TelegramAgent(BaseAgent):
                 else:
                     await self.send_response(f"✅ *[{ticker}] 분석 결과*: 기존 투자 Thesis에 영향을 미칠 만한 유의미한 변화가 발견되지 않았습니다.")
             except Exception as e:
-                self.logger.error(f"check 명령어 수행 에러: {e}")
-                await self.send_response(f"❌ [{ticker}] 검사 수행 중 에러 발생: {e}")
+                self.logger.error(f"check 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response(f"❌ [{ticker}] 검사 수행 중 내부 오류가 발생했습니다. 로그를 확인해주세요.")
 
         elif text.startswith("/rules"):
             try:
@@ -306,12 +319,13 @@ class TelegramAgent(BaseAgent):
                 msg = "📋 *승인 대기 중인 춘식이 자가진화 규칙 목록*\n\n"
                 for r in rules:
                     msg += f"🔹 *{r['rule_id']}*\n"
-                    msg += f"   - *설명*: {r['rule_text']}\n"
+                    msg += f"   - *설명*: {escape_markdown(r['rule_text'])}\n"
                     msg += f"   - *날짜*: {r['created_at']}\n"
                     msg += f"   👉 승인: `/approve {r['rule_id']}` | 반려: `/reject {r['rule_id']}`\n\n"
                 await self.send_response(msg)
             except Exception as e:
-                await self.send_response(f"❌ 대기 규칙 조회 실패: {e}")
+                self.logger.error(f"rules 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response("❌ 대기 규칙 조회에 실패했습니다.")
                 
         elif text.startswith("/approve"):
             parts = text.split()
@@ -326,7 +340,8 @@ class TelegramAgent(BaseAgent):
                 else:
                     await self.send_response(f"❌ 규칙 {rule_id} 활성화 실패. 존재하지 않는 ID이거나 이미 활성화되었을 수 있습니다.")
             except Exception as e:
-                await self.send_response(f"❌ 규칙 승인 중 에러 발생: {e}")
+                self.logger.error(f"approve 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response(f"❌ 규칙 {rule_id} 승인 중 내부 오류가 발생했습니다.")
                 
         elif text.startswith("/reject"):
             parts = text.split()
@@ -341,4 +356,5 @@ class TelegramAgent(BaseAgent):
                 else:
                     await self.send_response(f"❌ 규칙 {rule_id} 반려 실패. 존재하지 않는 ID일 수 있습니다.")
             except Exception as e:
-                await self.send_response(f"❌ 규칙 반려 중 에러 발생: {e}")
+                self.logger.error(f"reject 명령어 수행 에러: {e}", exc_info=True)
+                await self.send_response(f"❌ 규칙 {rule_id} 반려 중 내부 오류가 발생했습니다.")

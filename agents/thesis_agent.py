@@ -11,7 +11,7 @@ import config
 from agents.base import BaseAgent
 from learning.db import get_all_thesis_maps
 from plugins.news_monitor import fetch_recent_news, mark_news_as_processed
-from core.thesis_evaluator import evaluate_thesis_change
+from core.thesis_evaluator import evaluate_thesis_change, reconcile_thesis_debate
 
 class ThesisAgent(BaseAgent):
     """
@@ -29,10 +29,11 @@ class ThesisAgent(BaseAgent):
 
     async def start(self):
         await super().start()
-        # 시작 트리거 채널 구독 (Orchestrator 기동 시 작동 유도)
+        # 시작 트리거 채널 및 디베이트 응답 채널 구독
         await self.subscribe("system/trigger")
+        await self.subscribe("critic/debate_response")
         self._monitor_task = asyncio.create_task(self._periodic_monitor_loop())
-        self.logger.info("Thesis 감시 백그라운드 루프 기동 완료.")
+        self.logger.info("Thesis 감시 백그라운드 루프 기동 완료 (디베이트 구독 포함).")
 
     async def stop(self):
         await super().stop()
@@ -47,9 +48,10 @@ class ThesisAgent(BaseAgent):
 
     async def handle_message(self, channel: str, message: Any):
         if channel == "system/trigger":
-            # 시스템 기동 시 즉시 1회 검사 수행
             self.logger.info("System trigger received. Running instant thesis check...")
             await self.run_monitoring_cycle()
+        elif channel == "critic/debate_response":
+            await self.handle_debate_response(message)
 
     async def _periodic_monitor_loop(self):
         """주기적인 모니터링 수행 루프"""
@@ -66,12 +68,11 @@ class ThesisAgent(BaseAgent):
             await asyncio.sleep(self.check_interval)
 
     async def run_monitoring_cycle(self):
-        """모든 감시 종목에 대해 뉴스를 긁어오고 Thesis 변화를 분석하여 알림 전송"""
+        """모든 감시 종목에 대해 뉴스를 긁어오고 1차 분석을 수행하여 Critic에게 검증(토론) 요청"""
         if not self.bot_token or not self.chat_id:
             self.logger.warning("텔레그램 토큰 또는 챗 ID가 설정되지 않아 알림을 보낼 수 없습니다.")
             return
 
-        # 1. DB에서 모든 감시 대상 로드
         thesis_maps = await asyncio.to_thread(get_all_thesis_maps)
         if not thesis_maps:
             self.logger.info("감시 대상 종목이 없습니다.")
@@ -82,28 +83,84 @@ class ThesisAgent(BaseAgent):
         for item in thesis_maps:
             ticker = item["ticker"]
             
-            # 2. 최근 뉴스 24시간치 가져오기
+            # 최근 뉴스 24시간치 가져오기
             news_list = await asyncio.to_thread(fetch_recent_news, ticker, hours=24)
             if not news_list:
                 self.logger.info(f"[{ticker}] 최근 24시간 내 새 뉴스가 없습니다.")
                 continue
 
-            # 3. LLM 분석
-            self.logger.info(f"[{ticker}] 신규 뉴스 {len(news_list)}건 분석 요청...")
+            self.logger.info(f"[{ticker}] 신규 뉴스 {len(news_list)}건 1차 분석 요청...")
             eval_res = await asyncio.to_thread(evaluate_thesis_change, ticker, item, news_list)
             
-            # 4. 중요한 변화가 있을 때만 텔레그램 발송
             if eval_res.get("has_change"):
-                self.logger.info(f"🚨 [{ticker}] 유의미한 Thesis 변화 감지! 텔레그램 알림 발송 중...")
-                alert_text = f"🚨 *[{ticker}] Thesis 변화 감시 브리핑*\n\n{eval_res['evaluation_text']}"
+                self.logger.info(f"🚨 [{ticker}] 1차 변화 감지! CriticAgent에게 디베이트(검증) 요청 중...")
                 
-                await self.send_alert(alert_text)
+                # 대용량 데이터를 Shared Memory에 페이로드 참조 형식으로 저장
+                payload_data = {
+                    "ticker": ticker,
+                    "thesis_map": item,
+                    "news_list": news_list,
+                    "initial_evaluation": eval_res["evaluation_text"],
+                    "criticism": None,
+                    "final_reconciliation": None
+                }
                 
-                # 중복 알림 방지를 위해 수집된 뉴스들을 처리된 것으로 마크
-                for news in news_list:
-                    mark_news_as_processed(news["uuid"])
+                payload_tag = await self.broker.put_payload(f"debate:{ticker}", payload_data)
+                
+                # CriticAgent에게 순차적 디베이트 메시지 전송 (Turn 1)
+                debate_msg = {
+                    "ticker": ticker,
+                    "payload_tag": payload_tag,
+                    "turn": 1
+                }
+                await self.publish("thesis/debate_request", debate_msg)
             else:
                 self.logger.info(f"✅ [{ticker}] 기존 Thesis 내 범위 혹은 잡뉴스로 판정되어 패스합니다.")
+
+    async def handle_debate_response(self, message: dict):
+        """CriticAgent의 피드백을 수신하여 최종 합의(Reconciliation) 수행 및 텔레그램 발송"""
+        ticker = message.get("ticker")
+        payload_tag = message.get("payload_tag")
+        turn = message.get("turn", 0)
+
+        if turn != 2:
+            return
+
+        self.logger.info(f"📥 [{ticker}] CriticAgent로부터 반론 피드백 수신 (Turn 2). 최종 합의안 도출 중...")
+
+        try:
+            # Shared Memory에서 데이터 복구
+            payload_data = await self.broker.get_payload(payload_tag)
+            if not payload_data:
+                self.logger.error(f"공유 메모리에서 페이로드를 찾을 수 없습니다: {payload_tag}")
+                return
+
+            initial_eval = payload_data["initial_evaluation"]
+            criticism = payload_data.get("criticism", "특이 모순 발견되지 않음")
+
+            # 최종 합의 연산 (LLM 호출)
+            reconciled_text = await asyncio.to_thread(
+                reconcile_thesis_debate, ticker, initial_eval, criticism
+            )
+
+            # 결과 업데이트 및 공유 메모리 갱신
+            payload_data["final_reconciliation"] = reconciled_text
+            await self.broker.put_payload(f"debate:{ticker}", payload_data)
+
+            self.logger.info(f"✅ [{ticker}] 최종 디베이트 합의 리포트 발행 성공. 텔레그램 발송 중...")
+            alert_text = f"🚨 *[{ticker}] 최종 투자 Thesis 변화 분석 보고서*\n\n{reconciled_text}"
+            await self.send_alert(alert_text)
+
+            # 중복 방지를 위해 뉴스 처리 상태 마킹
+            news_list = payload_data.get("news_list", [])
+            await asyncio.to_thread(self._mark_news_processed, news_list)
+
+        except Exception as e:
+            self.logger.error(f"디베이트 합의 처리 중 오류 발생: {e}", exc_info=True)
+
+    def _mark_news_processed(self, news_list):
+        for news in news_list:
+            mark_news_as_processed(news["uuid"])
 
     async def send_alert(self, text: str):
         """텔레그램 알림 발송"""
