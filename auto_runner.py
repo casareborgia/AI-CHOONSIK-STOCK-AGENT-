@@ -57,11 +57,17 @@ def run_orchestrator(label=""):
     
     try:
         # 텔레그램 전송을 포함한 메인 오케스트레이터 실행 (python3로 실행)
-        result = subprocess.run([sys.executable, MAIN_ORCHESTRATOR_PATH], capture_output=True, text=True)
+        # 오케스트레이터가 멈춰도 스케줄러 루프가 영구 정지하지 않도록 타임아웃(기본 30분) 적용
+        result = subprocess.run(
+            [sys.executable, MAIN_ORCHESTRATOR_PATH],
+            capture_output=True, text=True, timeout=1800
+        )
         print(result.stdout)
         if result.stderr:
             print(f"--- [Error Output] ---\n{result.stderr}")
         print(f"[{datetime.datetime.now(KST)}] ✨ {label} 분석 및 보고 완료!")
+    except subprocess.TimeoutExpired:
+        print(f"⏱️ {label} 실행이 30분 타임아웃을 초과하여 강제 종료되었습니다. (다음 세션에서 재시도)")
     except Exception as e:
         print(f"❌ {label} 실행 중 오류 발생: {e}")
 

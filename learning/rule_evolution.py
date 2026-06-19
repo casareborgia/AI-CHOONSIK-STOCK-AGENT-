@@ -78,14 +78,19 @@ def get_next_rule_id() -> str:
     """DB 내의 기존 규칙 ID를 분석하여 R101, R102 등 100번대 신규 고유 ID를 부여합니다."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT rule_id FROM learned_rules WHERE rule_id LIKE 'R1%' ORDER BY rule_id DESC LIMIT 1")
-    row = cursor.fetchone()
+    # 'R' + 숫자 형태(예: R101)만 대상으로 하여 R1A_FOO 같은 비정형 ID가 섞여도
+    # int() 변환 시 ValueError로 크래시하지 않도록 한다.
+    cursor.execute("SELECT rule_id FROM learned_rules WHERE rule_id LIKE 'R1%'")
+    rows = cursor.fetchall()
     conn.close()
-    
-    if row:
-        current_num = int(row[0][1:])
-        return f"R{current_num + 1}"
-    return "R101"
+
+    max_num = 100  # 기본 시작점(다음 ID는 R101)
+    for r in rows:
+        rid = r[0]
+        suffix = rid[1:] if rid and rid.startswith("R") else ""
+        if suffix.isdigit():
+            max_num = max(max_num, int(suffix))
+    return f"R{max_num + 1}"
 
 def save_learned_rule(rule_id: str, rule_text: str, check_condition: str) -> bool:
     """

@@ -10,66 +10,29 @@
 
 import sys
 import os
-import json
-import urllib.request
 from datetime import datetime
 
 # 부모 디렉토리 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import config
-
-
-def clean_untrusted_text(text: str) -> str:
-    """외부 신뢰할 수 없는 텍스트에서 백틱 및 구분자 위조 시도를 무력화하고 정제합니다."""
-    if not text:
-        return ""
-    import re
-    s = str(text).replace("```", "'''")
-    # 구분자 토큰 위조 차단: <<<UNTRUSTED_...>>> 패턴을 통째로 중화
-    s = re.sub(r"<<<\s*UNTRUSTED[^>]*>>>", "[차단된 구분자]", s, flags=re.IGNORECASE)
-    return s
+from core.llm_client import clean_untrusted_text, OllamaUnavailable
+from core.llm_client import call_ollama as _call_ollama_raw
 
 
 def call_ollama(prompt, model_type="heavy"):
     """
-    로컬 Ollama 서버와 통신하여 스트림이 아닌 전체 텍스트 응답을 반환합니다.
-    (장애 및 오프라인 대비 타임아웃 및 고품질 Mock-up 폴백 내장)
+    로컬 Ollama 서버와 통신하여 전체 텍스트 응답을 반환합니다.
+    (공통 클라이언트를 사용하며, 최종 실패 시 고품질 Mock-up 리포트로 폴백)
     """
-    import time
-    url = config.OLLAMA_ENDPOINT
-    target_model = config.HEAVY_LLM_MODEL if model_type == "heavy" else config.LIGHT_LLM_MODEL
-    payload = {
-        "model": target_model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.1,  # 날짜 등 팩트 정확성을 극대화하기 위해 온도 최소화
-            "top_p": 0.95
-        }
-    }
-    
-    max_retries = 3
-    last_error = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            req = urllib.request.Request(
-                url, 
-                data=json.dumps(payload).encode('utf-8'),
-                headers={'Content-Type': 'application/json'},
-                method='POST'
-            )
-            # 타임아웃을 60초로 설정하여 로컬 LLM 로딩 지연 극복
-            with urllib.request.urlopen(req, timeout=60) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                return res_data.get("response", "응답 생성 실패")
-        except Exception as e:
-            last_error = e
-            # 장애 발생 시 로그 출력
-            print(f"⚠️ [call_ollama] {attempt}차 호출 실패 ({e}). 오프라인 폴백 준비 중...")
-            time.sleep(attempt * 2)
-            
-    # [무중단 최종 수비막: 고품질 모크 브리핑 생성]
-    # 프롬프트의 텍스트로부터 종목 정보를 정규 파싱
+    try:
+        return _call_ollama_raw(prompt, model_type=model_type)
+    except OllamaUnavailable:
+        print("⚠️ [call_ollama] Ollama 응답 실패 — 오프라인 폴백 리포트를 생성합니다.")
+        return _build_fallback_report(prompt)
+
+
+def _build_fallback_report(prompt):
+    """[무중단 최종 수비막] 프롬프트 텍스트에서 종목 정보를 파싱해 고품질 모크 브리핑을 생성합니다."""
     ticker = "UNKNOWN"
     signal = "관망"
     sector = "Unknown"

@@ -7,6 +7,7 @@ com.chunsik.autorun.mk3.plist
 
 # Data & logs
 *.db
+*.backup
 *.log
 run_state.json
 reports/

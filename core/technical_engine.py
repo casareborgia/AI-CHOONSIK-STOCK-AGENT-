@@ -31,7 +31,10 @@ def evaluate_signal(df: pd.DataFrame, item: dict, track: str = "Track A") -> dic
     네트워크 호출이 없어 고정 픽스처로 결정성(골든) 테스트가 가능합니다.
     df 길이가 부족하면 None을 반환합니다.
     """
-    if df is None or df.empty or len(df) < 40:
+    # MA60/MA120 정배열·수렴 국면 판정에 120개 봉이 필요하다.
+    # 40~119개 구간에서는 MA60/MA120이 NaN이 되어 비교가 조용히 모두 False("mixed")로
+    # 묻히므로, 데이터가 부족하면 분석 대상에서 제외한다.
+    if df is None or df.empty or len(df) < 120:
         return None
 
     # 1. 3중 스토캐스틱 파동 연산 (소 5.3.3 / 중 10.5.5 / 대 20.12.12)

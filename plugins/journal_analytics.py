@@ -56,12 +56,19 @@ class JournalAnalyzer:
         df = self.load_journal()
         if df is None or df.empty:
             return "매매일지 분석 데이터가 부족합니다."
-            
+
+        # 실제 사용자 엑셀에 필수 컬럼이 없으면 KeyError로 크래시하지 않도록 사전 검증
+        required_cols = {'profit_rate', 'reason'}
+        missing = required_cols - set(df.columns)
+        if missing:
+            return (f"매매일지에 필수 컬럼이 없어 분석할 수 없습니다: {', '.join(sorted(missing))}. "
+                    f"(필수 컬럼: profit_rate, reason)")
+
         # 기초 통계 연산
         wins = df[df['profit_rate'] > 0]
         losses = df[df['profit_rate'] < 0]
         win_rate = len(wins) / len(df) * 100
-        
+
         # 손실 거래 사유 문자열 취합
         loss_reasons = "\n".join(losses['reason'].astype(str).tolist())
         

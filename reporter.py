@@ -352,4 +352,5 @@ if __name__ == "__main__":
         'stoch_summary': 'S:▲ M:▲ L:▲',
         'ai_briefing': '샘플 텍스트'
     }]
-    generate_markdown_report(sample_secs, sample_cands)
+    sample_sub_themes = {}
+    generate_markdown_report(sample_secs, sample_sub_themes, sample_cands)

@@ -90,6 +90,11 @@ def get_leading_sectors():
             print(f"⚠️ {sector_name}({ticker}) 데이터 수집 실패: {e}")
             continue
             
+    # 모든 ETF 수집이 실패한 경우 빈 결과를 안전하게 반환 (KeyError 방지)
+    if not sector_results:
+        print("⚠️ 주도 섹터 데이터를 한 건도 수집하지 못했습니다. (네트워크/데이터 장애)")
+        return [], []
+
     # 스코어 기준 내림차순 정렬
     df_sectors = pd.DataFrame(sector_results).sort_values(by='score', ascending=False)
     

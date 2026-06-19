@@ -1,52 +1,22 @@
 import sys
 import os
-import json
-import urllib.request
 from datetime import datetime
 
 # 프로젝트 루트 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
-
-
-def clean_untrusted_text(text: str) -> str:
-    """외부 신뢰할 수 없는 텍스트에서 백틱 및 구분자 위조 시도를 무력화하고 정제합니다."""
-    if not text:
-        return ""
-    import re
-    s = str(text).replace("```", "'''")
-    # 구분자 토큰 위조 차단: <<<UNTRUSTED_...>>> 패턴을 통째로 중화
-    s = re.sub(r"<<<\s*UNTRUSTED[^>]*>>>", "[차단된 구분자]", s, flags=re.IGNORECASE)
-    return s
+from core.llm_client import clean_untrusted_text, OllamaUnavailable
+from core.llm_client import call_ollama as _call_ollama_raw
 
 
 def call_ollama(prompt: str, model_type: str = "heavy") -> str:
-    """Ollama API를 호출하여 Gemma 4 모델의 전체 텍스트 응답을 가져옵니다."""
-    url = config.OLLAMA_ENDPOINT
-    target_model = config.HEAVY_LLM_MODEL if model_type == "heavy" else config.LIGHT_LLM_MODEL
-    payload = {
-        "model": target_model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.1,
-            "top_p": 0.95
-        }
-    }
+    """공통 LLM 클라이언트(재시도 내장)를 사용하며, 최종 실패 시 안내 문자열을 반환합니다."""
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-        # 60초로 타임아웃 연장 (Gemma4 모델 첫 로딩 시간 확보)
-        with urllib.request.urlopen(req, timeout=60) as response:
-            res_data = json.loads(response.read().decode('utf-8'))
-            return res_data.get("response", "응답 생성 실패")
-    except Exception as e:
+        return _call_ollama_raw(prompt, model_type=model_type)
+    except OllamaUnavailable as e:
         print(f"⚠️ [core/thesis_evaluator.py] Ollama 호출 실패: {e}")
         return "Ollama 연동 실패"
+
 
 def generate_initial_thesis_map(ticker: str, name: str, info: dict) -> dict:
     """

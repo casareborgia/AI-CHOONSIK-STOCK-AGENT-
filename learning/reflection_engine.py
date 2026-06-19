@@ -150,10 +150,22 @@ class ReflectionEngine:
         cursor = conn.cursor()
         try:
             # 1. outcomes 테이블 적재 (또는 갱신)
+            # INSERT OR REPLACE는 행을 삭제 후 재삽입하여 outcome_tracker가 채운
+            # hit_target/hit_stoploss를 NULL로 날려버린다. (report_id, days_elapsed=5)
+            # 유니크 인덱스 기준 ON CONFLICT로 성찰 관련 컬럼만 갱신하여 기존 값을 보존한다.
             cursor.execute("""
-                INSERT OR REPLACE INTO outcomes (
+                INSERT INTO outcomes (
                     report_id, ticker, entry_price, check_date, check_price, days_elapsed, return_pct, outcome, benchmark_return_pct, alpha_return_pct
                 ) VALUES (?, ?, ?, ?, ?, 5, ?, ?, ?, ?)
+                ON CONFLICT(report_id, days_elapsed) DO UPDATE SET
+                    ticker = excluded.ticker,
+                    entry_price = excluded.entry_price,
+                    check_date = excluded.check_date,
+                    check_price = excluded.check_price,
+                    return_pct = excluded.return_pct,
+                    outcome = excluded.outcome,
+                    benchmark_return_pct = excluded.benchmark_return_pct,
+                    alpha_return_pct = excluded.alpha_return_pct
             """, (report_id, ticker, entry_price, check_date, check_price, return_pct, outcome, benchmark_return_pct, alpha_return_pct))
 
             # 2. learned_rules 테이블에 피드백 누적

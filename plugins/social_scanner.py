@@ -19,6 +19,7 @@ import json
 import re
 import time
 import urllib.request
+import urllib.parse
 from urllib.error import URLError, HTTPError
 import yfinance as yf
 

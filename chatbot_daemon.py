@@ -15,6 +15,10 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
+# httpx/httpcore의 INFO 로그는 요청 URL(텔레그램 봇 토큰 포함)을 그대로 출력하므로
+# 토큰 유출 방지를 위해 WARNING 이상만 남긴다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("ChatbotDaemon")
 
 async def main():

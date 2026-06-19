@@ -4,6 +4,8 @@ import sys
 import time
 from datetime import datetime, timedelta
 
+import config
+
 from message_bus.broker import MessageBroker
 from agents.market_agent import MarketAgent
 from agents.screener_agent import ScreenerAgent
@@ -25,6 +27,10 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
+# httpx/httpcore의 INFO 로그는 요청 URL(텔레그램 봇 토큰 포함)을 그대로 출력하므로
+# 토큰 유출 방지를 위해 WARNING 이상만 남긴다.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("Orchestrator")
 
 async def main():
@@ -126,13 +132,19 @@ async def main():
     logger.info("Publishing 'system/trigger' to initiate execution flow.")
     await broker.publish("system/trigger", {"action": "start"})
 
-    # 6. 완료 신호 대기
+    # 6. 완료 신호 대기 (에이전트 무한 정지 시 전체 프로세스가 멈추지 않도록 타임아웃 적용)
+    PIPELINE_TIMEOUT_SEC = getattr(config, "PIPELINE_TIMEOUT_SEC", 900)
+    result = {}
     try:
-        channel, result = await done_queue.get()
+        channel, result = await asyncio.wait_for(done_queue.get(), timeout=PIPELINE_TIMEOUT_SEC)
         logger.info(f"Received completion signal on '{channel}': {result}")
         done_queue.task_done()
+    except asyncio.TimeoutError:
+        logger.error(f"⏱️ 파이프라인 완료 신호를 {PIPELINE_TIMEOUT_SEC}초 내에 받지 못했습니다. (에이전트 정지 의심)")
+        result = {"status": "timeout", "error": f"no completion within {PIPELINE_TIMEOUT_SEC}s"}
     except asyncio.CancelledError:
         logger.warning("Orchestrator execution was cancelled.")
+        result = {"status": "cancelled"}
     finally:
         # 7. 구독 해제 및 모든 에이전트 정상 정지
         logger.info("Shutting down all active agents...")

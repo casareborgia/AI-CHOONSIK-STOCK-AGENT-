@@ -149,9 +149,12 @@ def verify_with_yahoo(tickers, target_sectors=None, config_preset=None):
                 continue
                 
             # 3. 부채비율 교차 검증 (debtToEquity)
+            # yfinance의 debtToEquity는 항상 백분율 형태(예: 150 -> 1.5배)로 반환되므로
+            # 일괄 100으로 나눠 배수(ratio)로 정규화한다. (>10 휴리스틱은 진짜 고레버리지
+            # 종목을 오분류할 수 있어 제거)
             de_ratio = info.get('debtToEquity', 0)
             if de_ratio is not None and max_debt is not None:
-                normalized_de = de_ratio / 100.0 if de_ratio > 10 else de_ratio
+                normalized_de = de_ratio / 100.0
                 if normalized_de > max_debt:
                     continue
                     

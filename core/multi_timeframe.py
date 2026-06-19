@@ -15,21 +15,8 @@ from datetime import datetime
 # 부모 디렉토리 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import config
-
-
-def compute_stochastic_tv(df: pd.DataFrame, length: int, k_len: int, d_len: int):
-    """
-    TradingView 스토캐스틱 f_stoch 방식을 정확히 구현합니다.
-    """
-    lowest_low = df['Low'].rolling(window=length).min()
-    highest_high = df['High'].rolling(window=length).max()
-    
-    # 0 나누기 예방
-    raw_k = 100 * (df['Close'] - lowest_low) / (highest_high - lowest_low + 1e-8)
-    k = raw_k.rolling(window=k_len).mean()
-    d = k.rolling(window=d_len).mean()
-    
-    return k, d
+# 스토캐스틱 계산은 sector_monitor의 단일 구현을 재사용한다 (중복 구현으로 인한 로직 분기 방지).
+from core.sector_monitor import compute_stochastic_tv
 
 
 def pivotlow(series: pd.Series, left: int, right: int) -> pd.Series:
@@ -153,7 +140,11 @@ def analyze_timeframe(ticker: str, timeframe: str, vol_multiplier: float = 1.5) 
     
     ma20_curr = df['MA20'].iloc[curr_idx]
     ma60_curr = df['MA60'].iloc[curr_idx]
-    ma120_curr = df['MA120'].iloc[curr_idx] if not pd.isna(df['MA120'].iloc[curr_idx]) else df['MA20'].iloc[curr_idx]
+    # MA120은 데이터가 충분하지 않으면 NaN. MA20으로 대체하면 정배열 판정이 왜곡되므로
+    # 가용 여부를 별도로 보관하여 추세 판정 시 조건을 분기한다.
+    ma120_raw = df['MA120'].iloc[curr_idx]
+    has_ma120 = not pd.isna(ma120_raw)
+    ma120_curr = ma120_raw if has_ma120 else ma60_curr
     
     # 스토캐스틱 K/D 최신 및 직전 값
     sk_curr, sk_prev = s_k.iloc[curr_idx], s_k.iloc[prev_idx]
@@ -227,13 +218,21 @@ def analyze_timeframe(ticker: str, timeframe: str, vol_multiplier: float = 1.5) 
             signals.append("twin_top")
             
     # 7. 추세 배경 판정 (MA 정배열/역배열)
-    # 120일 선이 제공되는 데이터 수에 따라 NaT일 수 있으므로 20, 60 비교 중심
-    if (ma20_curr > ma60_curr) and (ma60_curr > ma120_curr):
-        ma_trend = "bull"
-    elif (ma20_curr < ma60_curr) and (ma60_curr < ma120_curr):
-        ma_trend = "bear"
+    # 120일 선이 데이터 부족으로 NaN인 경우, MA120 조건은 제외하고 MA20/MA60만으로 판정한다.
+    if has_ma120:
+        if (ma20_curr > ma60_curr) and (ma60_curr > ma120_curr):
+            ma_trend = "bull"
+        elif (ma20_curr < ma60_curr) and (ma60_curr < ma120_curr):
+            ma_trend = "bear"
+        else:
+            ma_trend = "neutral"
     else:
-        ma_trend = "neutral"
+        if ma20_curr > ma60_curr:
+            ma_trend = "bull"
+        elif ma20_curr < ma60_curr:
+            ma_trend = "bear"
+        else:
+            ma_trend = "neutral"
         
     return {
         "ticker": ticker,

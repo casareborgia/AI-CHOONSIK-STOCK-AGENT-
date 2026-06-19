@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import os
+import re
 import httpx
 import logging
 from typing import Any
@@ -13,6 +14,14 @@ from agents.base import BaseAgent
 from learning.db import add_or_update_thesis, get_thesis_map, get_all_thesis_maps, delete_thesis_map, get_pending_rules, approve_rule, reject_rule
 from core.thesis_evaluator import generate_initial_thesis_map, evaluate_thesis_change
 from plugins.news_monitor import fetch_recent_news
+
+# 티커 형식 검증 정규식 (영문 1~5자리). 유해 입력으로 인한 로컬 LLM 과부하 방지.
+TICKER_RE = re.compile(r"^[A-Z]{1,5}$")
+
+
+def is_valid_ticker(ticker: str) -> bool:
+    return bool(TICKER_RE.match(ticker))
+
 
 class TelegramAgent(BaseAgent):
     """
@@ -50,17 +59,29 @@ class TelegramAgent(BaseAgent):
         pass
 
     async def send_response(self, text: str):
-        """답장 메시지 전송"""
+        """답장 메시지 전송.
+
+        AI 생성 텍스트/뉴스 제목에 Markdown 특수문자(_, *, `, [)가 섞이면 Telegram이
+        400 'can't parse entities' 오류로 발송을 거부하여 알림이 조용히 누락된다.
+        Markdown 발송이 실패하면 parse_mode 없이 평문으로 재시도하여 알림 유실을 막는다.
+        """
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "Markdown"
-        }
         try:
-            resp = await self.client.post(url, json=payload)
-            if resp.status_code != 200:
-                self.logger.error(f"텔레그램 응답 발송 실패: {resp.text}")
+            resp = await self.client.post(url, json={
+                "chat_id": self.chat_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            })
+            if resp.status_code == 200:
+                return
+            self.logger.warning(f"텔레그램 Markdown 발송 실패({resp.status_code}), 평문으로 재시도: {resp.text}")
+            # 평문 폴백 (parse_mode 미지정)
+            resp2 = await self.client.post(url, json={
+                "chat_id": self.chat_id,
+                "text": text
+            })
+            if resp2.status_code != 200:
+                self.logger.error(f"텔레그램 평문 폴백 발송도 실패: {resp2.text}")
         except Exception as e:
             self.logger.error(f"텔레그램 응답 발송 예외: {e}")
 
@@ -138,8 +159,7 @@ class TelegramAgent(BaseAgent):
                 return
                 
             ticker = parts[1].upper()
-            import re
-            if not re.match(r"^[A-Z]{1,5}$", ticker):
+            if not is_valid_ticker(ticker):
                 await self.send_response("⚠️ 유효하지 않은 티커 형식입니다. 영문 1~5자리로 입력해주세요. (예: AAPL)")
                 return
             await self.send_response(f"🤖 [{ticker}] 기업 정보를 분석하여 최초 Thesis Map 초안을 빌드하고 있습니다. 잠시만 기다려주세요...")
@@ -179,8 +199,7 @@ class TelegramAgent(BaseAgent):
                 return
                 
             ticker = parts[0].upper()
-            import re
-            if not re.match(r"^[A-Z]{1,5}$", ticker):
+            if not is_valid_ticker(ticker):
                 await self.send_response("⚠️ 유효하지 않은 티커 형식입니다. 첫 번째 항목은 영문 1~5자리 티커여야 합니다. (예: AAPL)")
                 return
             thesis_data = {
@@ -229,8 +248,7 @@ class TelegramAgent(BaseAgent):
                 await self.send_response("⚠️ 삭제할 티커를 입력해주세요. 예: `/del AAPL`")
                 return
             ticker = parts[1].upper()
-            import re
-            if not re.match(r"^[A-Z]{1,5}$", ticker):
+            if not is_valid_ticker(ticker):
                 await self.send_response("⚠️ 유효하지 않은 티커 형식입니다. 영문 1~5자리로 입력해주세요. (예: AAPL)")
                 return
             try:
@@ -248,8 +266,7 @@ class TelegramAgent(BaseAgent):
                 await self.send_response("⚠️ 검사할 티커를 입력해주세요. 예: `/check AAPL`")
                 return
             ticker = parts[1].upper()
-            import re
-            if not re.match(r"^[A-Z]{1,5}$", ticker):
+            if not is_valid_ticker(ticker):
                 await self.send_response("⚠️ 유효하지 않은 티커 형식입니다. 영문 1~5자리로 입력해주세요. (예: AAPL)")
                 return
             await self.send_response(f"🔍 [{ticker}]의 최근 뉴스/공시 및 기존 Thesis Map 비교 분석을 즉시 가동합니다...")

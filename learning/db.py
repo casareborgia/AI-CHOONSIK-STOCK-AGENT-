@@ -288,21 +288,26 @@ def save_report_to_db(stock: dict, raw_report: str, revised_report: str, entry_g
     stop_pct = float(round(max(5.0, min(12.0, 5.0 * beta))))
     
     target_price = stock.get("target_price", close * 1.20)
-    
-    cursor.execute("""
-        INSERT INTO reports (
-            date, ticker, sector, signal_label, entry_grade, pe_ratio, peg_ratio, 
-            inst_ownership, close_price, target_price, stop_loss_pct, report_text, revised_text, run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        today_str, ticker, sector, signal, entry_grade, pe, peg, 
-        inst_own, close, target_price, stop_pct, raw_report, revised_report, run_id
-    ))
-    
-    report_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return report_id
+
+    try:
+        cursor.execute("""
+            INSERT INTO reports (
+                date, ticker, sector, signal_label, entry_grade, pe_ratio, peg_ratio,
+                inst_ownership, close_price, target_price, stop_loss_pct, report_text, revised_text, run_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            today_str, ticker, sector, signal, entry_grade, pe, peg,
+            inst_own, close, target_price, stop_pct, raw_report, revised_report, run_id
+        ))
+        report_id = cursor.lastrowid
+        conn.commit()
+        return report_id
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] save_report_to_db 실패: {e}")
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def save_run(run_id: str, started_at: str, finished_at: str, trigger: str,
              leading_sectors, n_signals: int, n_picks: int, status: str, elapsed_sec: float):
@@ -392,22 +397,27 @@ def save_validation_results(report_id: int, violations: list[dict], auto_fixed: 
     """검증 오류 내역을 DB validations 테이블에 저장합니다."""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    for v in violations:
-        cursor.execute("""
-            INSERT INTO validations (report_id, rule_id, rule_name, severity, description, auto_fixed)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (report_id, v["rule_id"], v["rule_name"], v["severity"], v["description"], int(auto_fixed)))
-        
-        # 발동된 규칙 카운트 1 증가
-        cursor.execute("""
-            UPDATE learned_rules 
-            SET trigger_count = trigger_count + 1 
-            WHERE rule_id = ?
-        """, (v["rule_id"],))
-        
-    conn.commit()
-    conn.close()
+
+    try:
+        for v in violations:
+            cursor.execute("""
+                INSERT INTO validations (report_id, rule_id, rule_name, severity, description, auto_fixed)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (report_id, v["rule_id"], v["rule_name"], v["severity"], v["description"], int(auto_fixed)))
+
+            # 발동된 규칙 카운트 1 증가
+            cursor.execute("""
+                UPDATE learned_rules
+                SET trigger_count = trigger_count + 1
+                WHERE rule_id = ?
+            """, (v["rule_id"],))
+
+        conn.commit()
+    except Exception as e:
+        print(f"⚠️ [learning/db.py] save_validation_results 실패: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 def add_or_update_thesis(ticker: str, name: str, data: dict) -> bool:
     """관심 종목의 Thesis Map 데이터를 DB에 삽입하거나 갱신합니다."""
@@ -522,15 +532,32 @@ def add_graph_edge(source_type: str, source_id: str, target_type: str, target_id
     cursor = conn.cursor()
     success = False
     try:
-        # 동일한 소스-타겟-관계가 존재하면 weight와 생성일을 업데이트
+        # 동일한 소스-타겟-관계가 이미 존재하면 weight/생성일을 갱신, 없으면 신규 삽입.
+        # (knowledge_graph에 유니크 제약이 없고 기존 데이터에 중복이 있을 수 있어
+        #  ON CONFLICT 대신 존재 확인 후 UPSERT 방식으로 처리)
         cursor.execute("""
-            INSERT INTO knowledge_graph (source_type, source_id, target_type, target_id, relation_type, weight)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (source_type, source_id, target_type, target_id, relation_type, weight))
+            SELECT id FROM knowledge_graph
+            WHERE source_type = ? AND source_id = ? AND target_type = ?
+              AND target_id = ? AND relation_type = ?
+        """, (source_type, source_id, target_type, target_id, relation_type))
+        existing = cursor.fetchone()
+
+        if existing:
+            cursor.execute("""
+                UPDATE knowledge_graph
+                SET weight = ?, created_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (weight, existing[0]))
+        else:
+            cursor.execute("""
+                INSERT INTO knowledge_graph (source_type, source_id, target_type, target_id, relation_type, weight)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (source_type, source_id, target_type, target_id, relation_type, weight))
         conn.commit()
         success = True
     except Exception as e:
         print(f"⚠️ [learning/db.py] add_graph_edge 실패: {e}")
+        conn.rollback()
     finally:
         conn.close()
     return success
@@ -669,5 +696,8 @@ def reject_rule(rule_id: str) -> bool:
         conn.close()
     return success
 
-# SQLite DB 초기화 자동 실행
-init_db()
+# SQLite DB 초기화 자동 실행 (스키마 오류가 앱 전체 임포트를 깨뜨리지 않도록 가드)
+try:
+    init_db()
+except Exception as e:
+    print(f"🚨 [learning/db.py] init_db() 실패 — DB 초기화를 건너뜁니다: {e}")
