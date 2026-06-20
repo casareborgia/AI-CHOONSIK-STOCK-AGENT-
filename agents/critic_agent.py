@@ -31,15 +31,18 @@ class CriticAgent(BaseAgent):
             rd_data = await asyncio.to_thread(fetch_target_reddit_sentiment, ticker)
             
             item['social_sentiment'] = {
-                'stocktwits_bullish_pct': st_data.get('bullish_pct', 50.0),
-                'stocktwits_total': st_data.get('total_count', 0),
-                'stocktwits_samples': st_data.get('messages', []),
-                'reddit_posts': rd_data
+                'stocktwits': st_data,
+                'reddit': rd_data
             }
-            self.logger.info(f"Social sentiment fetched for {ticker}: Bullish {st_data.get('bullish_pct', 50.0)}%")
+            st_bull = st_data.value.get('bullish_pct', 50.0) if st_data.is_usable else "N/A"
+            self.logger.info(f"Social sentiment fetched for {ticker}: Bullish {st_bull}%")
         except Exception as e:
             self.logger.error(f"Failed to fetch social sentiment for {ticker}: {e}")
-            item['social_sentiment'] = None
+            from learning.data_quality import Provenance
+            item['social_sentiment'] = {
+                'stocktwits': Provenance.unavailable("stocktwits", str(e)),
+                'reddit': Provenance.unavailable("reddit", str(e))
+            }
 
     async def start(self):
         await super().start()

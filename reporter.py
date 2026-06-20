@@ -66,6 +66,21 @@ def generate_markdown_report(leading_sectors, sub_theme_results, candidates):
     today_str = now.strftime("%Y-%m-%d")
     report_filename = f"daily_briefing_{today_str}.md"
     
+    # [품질 보증 배너 생성]
+    from learning.data_quality import ReportQuality, Provenance
+    quality = ReportQuality()
+    for c in candidates:
+        if c.get('is_degraded'):
+            missing = c.get('missing_sources', [])
+            if not missing:
+                quality.record(Provenance.unavailable("ollama", "Ollama Unavailable"), critical=True)
+            for m in missing:
+                critical = m.startswith("CRITICAL:")
+                source_name = m.replace("CRITICAL:", "")
+                quality.record(Provenance.unavailable(source_name, f"{source_name} data missing"), critical=critical)
+                
+    banner_text = quality.banner()
+    
     # 2. 연도-분기-월 동적 폴더명 연산 (예: 2026년-2분기-5월)
     year = now.year
     month = now.month
@@ -264,6 +279,8 @@ def generate_markdown_report(leading_sectors, sub_theme_results, candidates):
 """
     
     with open(report_path, 'w', encoding='utf-8') as f:
+        if banner_text:
+            f.write(banner_text + "\n")
         f.write(md_content)
         
     print(f"\n📝 [5단계-A: 리포팅] 일간 종합 분석 리포트 생성 완료: {report_path}")

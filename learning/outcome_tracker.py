@@ -121,14 +121,12 @@ def track_outcomes():
                 
             alpha_return_pct = return_pct - benchmark_return_pct
             
-            # 5. 최종 성과 라벨 판정 (Alpha가 양수이고 컷오프 안당했으면 win 가능성 높임)
-            # 여기서는 기존 룰(목표가 도달 등)을 따르되 수익률을 절대수익률 기준으로 판정
+            # 5. 최종 성과 라벨 판정 (Alpha가 양수이고 컷오프 안당했으면 win)
+            # 승/패 판정을 절대수익(return_pct)이 아니라 alpha 기준으로 판정
             if hit_stoploss:
                 outcome = "stopped_out"
-            elif hit_target:
+            elif alpha_return_pct > 0:
                 outcome = "win"
-            elif return_pct > 0:
-                outcome = "hold"
             else:
                 outcome = "loss"
                 

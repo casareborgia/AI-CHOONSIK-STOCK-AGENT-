@@ -16,15 +16,16 @@ from learning.db import get_connection
 from core.ai_verify import call_ollama
 
 def analyze_violation_patterns() -> list[dict]:
-    """최근 30일간 반복적으로 발생한 위반 빈도수를 순위 매겨 제안 요소를 추출합니다."""
+    """최근 30일간 반복적으로 발생한 위반 빈도수를 순위 매겨 제안 요소를 추출합니다. (degraded 제외)"""
     conn = get_connection()
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT rule_id, rule_name, COUNT(*) as freq, severity
-        FROM validations
-        WHERE created_at >= date('now', '-30 days')
-        GROUP BY rule_id
+        SELECT v.rule_id, v.rule_name, COUNT(*) as freq, v.severity
+        FROM validations v
+        JOIN reports r ON v.report_id = r.id
+        WHERE v.created_at >= date('now', '-30 days') AND COALESCE(r.is_degraded,0)=0
+        GROUP BY v.rule_id
         ORDER BY freq DESC
     """)
     patterns = cursor.fetchall()
@@ -43,7 +44,7 @@ def analyze_violation_patterns() -> list[dict]:
     return suggestions
 
 def measure_rule_effectiveness() -> dict:
-    """자동 교정된 리포트 집단과 원본 리포트 집단 간의 실제 투자 적중률(Win Rate)과 수익률 변위를 비교합니다."""
+    """자동 교정된 리포트 집단과 원본 리포트 집단 간의 실제 투자 적중률(Win Rate)과 수익률 변위를 비교합니다. (degraded 제외)"""
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -57,7 +58,7 @@ def measure_rule_effectiveness() -> dict:
         FROM outcomes o
         JOIN reports r ON o.report_id = r.id
         LEFT JOIN validations v ON r.id = v.report_id
-        WHERE o.days_elapsed = 20
+        WHERE o.days_elapsed = 20 AND COALESCE(r.is_degraded,0)=0
         GROUP BY group_type
     """)
     rows = cursor.fetchall()
@@ -92,26 +93,122 @@ def get_next_rule_id() -> str:
             max_num = max(max_num, int(suffix))
     return f"R{max_num + 1}"
 
-def save_learned_rule(rule_id: str, rule_text: str, check_condition: str) -> bool:
+from typing import Any
+
+def save_learned_rule(rule: Any, rule_text: str = None, check_condition: str = None, status: str = "shadow", stats: dict = None) -> bool:
     """
-    진화된 신규 규칙을 DB에 승인 대기 상태(is_active = FALSE)로 안전하게 적재합니다.
+    구조화된 진화 규칙 또는 레거시 자연어 규칙을 DB에 안전하게 적재합니다.
     """
+    import json
     conn = get_connection()
     cursor = conn.cursor()
+    
+    if isinstance(rule, dict):
+        rule_id = rule.get("rule_id")
+        clauses = []
+        for c in rule.get("when", []):
+            clauses.append(f"{c.get('feature')} {c.get('op')} {c.get('value')}")
+        when_str = " AND ".join(clauses)
+        final_rule_text = f"IF {when_str} THEN {rule.get('action')}"
+        rule_json = json.dumps(rule, ensure_ascii=False)
+        
+        ci_low = stats.get("ci_low") if stats else None
+        ci_high = stats.get("ci_high") if stats else None
+        live_alpha = stats.get("alpha_diff") if stats else None
+        is_active = 1 if status == "active" else 0
+    else:
+        rule_id = rule
+        final_rule_text = f"[{check_condition}] -> {rule_text}"
+        rule_json = None
+        ci_low, ci_high, live_alpha = None, None, None
+        is_active = 0
+        status = "proposed"
+        
     try:
-        # 안전한 머신-휴먼 크로스체크를 위해 is_active = 0 (기본값)으로 추가
         cursor.execute("""
-            INSERT INTO learned_rules (rule_id, rule_text, source, trigger_count, effectiveness, is_active)
-            VALUES (?, ?, ?, 0, 0.0, 0)
-        """, (rule_id, f"[{check_condition}] -> {rule_text}", "evolution"))
+            INSERT INTO learned_rules (
+                rule_id, rule_text, source, trigger_count, effectiveness, is_active, 
+                status, ci_low, ci_high, live_alpha, last_backtest_at, rule_json
+            ) VALUES (?, ?, 'evolution', 0, 0.0, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            ON CONFLICT(rule_id) DO UPDATE SET
+                rule_text = excluded.rule_text,
+                is_active = excluded.is_active,
+                status = excluded.status,
+                ci_low = excluded.ci_low,
+                ci_high = excluded.ci_high,
+                live_alpha = excluded.live_alpha,
+                last_backtest_at = CURRENT_TIMESTAMP,
+                rule_json = excluded.rule_json
+        """, (rule_id, final_rule_text, is_active, status, ci_low, ci_high, live_alpha, rule_json))
         conn.commit()
-        print(f"   💾 [rule_evolution.py] AI 진화 규칙 {rule_id}가 승인 대기 상태(is_active=0)로 DB에 안전 적재되었습니다!")
-        conn.close()
+        print(f"   💾 [rule_evolution.py] AI 진화 규칙 {rule_id}가 {status} 상태로 DB에 안전 적재되었습니다!")
         return True
     except Exception as e:
         print(f"   ⚠️ [rule_evolution.py] 규칙 DB 적재 에러: {e}")
-        conn.close()
         return False
+    finally:
+        conn.close()
+
+
+def update_rules_lifecycle():
+    """
+    shadow 규칙 승격 및 active 규칙 재백테스트를 통해 강등/유지를 결정하는 생애주기 관리 함수.
+    """
+    from learning.rule_backtester import backtest_rule
+    import json
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # 1. shadow 규칙 로드
+    cursor.execute("SELECT rule_id, rule_json FROM learned_rules WHERE status = 'shadow'")
+    shadows = cursor.fetchall()
+    
+    for rule_id, rule_json_str in shadows:
+        if not rule_json_str:
+            continue
+        try:
+            rule = json.loads(rule_json_str)
+            res = backtest_rule(rule)
+            if res["verdict"] == "PROMOTE":
+                cursor.execute("""
+                    UPDATE learned_rules 
+                    SET status = 'active', is_active = 1, 
+                        ci_low = ?, ci_high = ?, live_alpha = ?, last_backtest_at = CURRENT_TIMESTAMP
+                    WHERE rule_id = ?
+                """, (res.get("ci_low"), res.get("ci_high"), res.get("alpha_diff"), rule_id))
+                print(f"📈 [Rule Lifecycle] 규칙 {rule_id}가 shadow -> active로 승격되었습니다! (alpha 차: {res.get('alpha_diff'):+.2f}%p)")
+            elif res["verdict"] == "REJECT":
+                cursor.execute("UPDATE learned_rules SET status = 'retired', is_active = 0 WHERE rule_id = ?", (rule_id,))
+                print(f"📉 [Rule Lifecycle] 규칙 {rule_id}가 shadow 단계에서 REJECT되어 retired 처리되었습니다.")
+        except Exception as e:
+            print(f"⚠️ [Rule Lifecycle] shadow 규칙 {rule_id} 검증 오류: {e}")
+            
+    # 2. active 규칙 재백테스트 및 강등
+    cursor.execute("SELECT rule_id, rule_json FROM learned_rules WHERE status = 'active'")
+    actives = cursor.fetchall()
+    
+    for rule_id, rule_json_str in actives:
+        if not rule_json_str:
+            continue
+        try:
+            rule = json.loads(rule_json_str)
+            res = backtest_rule(rule)
+            if res["verdict"] != "PROMOTE":
+                cursor.execute("UPDATE learned_rules SET status = 'retired', is_active = 0 WHERE rule_id = ?", (rule_id,))
+                print(f"📉 [Rule Lifecycle] 규칙 {rule_id}가 active -> retired로 자동 강등되었습니다. (사유: {res.get('reason')})")
+            else:
+                cursor.execute("""
+                    UPDATE learned_rules 
+                    SET ci_low = ?, ci_high = ?, live_alpha = ?, last_backtest_at = CURRENT_TIMESTAMP
+                    WHERE rule_id = ?
+                """, (res.get("ci_low"), res.get("ci_high"), res.get("alpha_diff"), rule_id))
+        except Exception as e:
+            print(f"⚠️ [Rule Lifecycle] active 규칙 {rule_id} 검증 오류: {e}")
+            
+    conn.commit()
+    conn.close()
+
 
 def run_weekly_evolution():
     """
@@ -120,6 +217,12 @@ def run_weekly_evolution():
     """
     print("\n🧬 [rule_evolution.py] 춘식이 자기진화 엔진 가동 시작...")
     
+    # 0. 생애주기 관리 작동 (shadow 규칙 승격 및 active 규칙 재백테스트 강등)
+    try:
+        update_rules_lifecycle()
+    except Exception as lifecycle_err:
+        print(f"   ⚠️ [rule_evolution.py] 규칙 라이프사이클 업데이트 중 예외 발생: {lifecycle_err}")
+        
     # 1. 반복 에러 유형 및 성과 분석 수집
     violations = analyze_violation_patterns()
     performance = measure_rule_effectiveness()
@@ -130,10 +233,10 @@ def run_weekly_evolution():
         
     next_id = get_next_rule_id()
     
-    # 2. Gemma-2 진화 지침 프롬프트 작성
+    # 2. Gemma-2 진화 지침 프롬프트 작성 (구조화 JSON 규칙 제안 유도)
     prompt = f"""[투자 알고리즘 자기 진화 관리 지침서]
 당신은 투자 AI 춘식이의 리포트 신뢰성을 지적하고 보강하는 고수준 퀀트 아키텍트입니다.
-과거 리포트가 위반한 오류 패턴 및 실제 20일 뒤의 성과 분석 데이터를 참고하여, 다음 리포트의 가치 판단 누수를 철저히 차단할 '새로운 1개의 정량 검사 규칙'을 정교하게 도출하십시오.
+과거 리포트가 위반한 오류 패턴 및 실제 20일 뒤의 성과 분석 데이터를 참고하여, 다음 리포트의 가치 판단 누수를 철저히 차단할 '새로운 1개의 구조화 정량 검사 규칙'을 정교하게 도출하십시오.
 
 ## [과거 30일 위반 유형 데이터]
 {json.dumps(violations, ensure_ascii=False, indent=2) if violations else "특이 반복 위반 없음"}
@@ -144,12 +247,25 @@ def run_weekly_evolution():
 
 ## [작성 규칙 스펙 (100% 준수)]
 1. 새로 제안할 규칙 ID는 **{next_id}** 로 부여하십시오.
-2. 분석 텍스트에서 모호한 지침을 피하고, 철저히 정량적(예: P/E, PEG, 52주고점대비%, 거래량, 기관지분율 등) 기준의 '조건-행동' 논리로 설계하십시오.
-3. 생성된 규칙은 주관적 서술을 엄금하고 단일하고 명료한 키워드와 함께 설계하십시오.
+2. 분석 텍스트에서 모호한 지침을 피하고, 철저히 정량적 피처들을 사용하여 평가 가능한 논리 연산자로 설계하십시오.
+   - 허용된 피처 집합 (ALLOWED_FEATURES):
+     pe, peg, inst_own, beta, sector, regime, close, signal_label, mtf_entry_grade, track,
+     ma5, ma20, ma60, ma120, stoch_s_k, stoch_s_d, stoch_m_k, stoch_m_d, stoch_l_k, stoch_l_d,
+     s_rising, m_rising, l_rising, vol_ratio, is_vol_surge
+   - 허용된 연산자 (OPS):
+     gt (초과), gte (이상), lt (미만), lte (이하), eq (같음), ne (다름), in (포함), contains (포함여부)
+3. 생성할 액션(action)은 반드시 "veto" (비토 / 차단), "penalize" (감점), "boost" (가점) 중 하나여야 합니다.
 4. 반드시 완벽한 JSON 포맷 1개만으로 결과물을 리턴하십시오. 부가 설명이나 서론, 결론, 마크다운 코드 블록(```)을 리턴하지 마십시오.
 
 ## [출력 JSON 포맷 예시]
-{{"rule_id": "{next_id}", "check_condition": "P/E가 40을 초과하고 52주 고점 대비 -5% 이내인 고평가 상태", "rule_text": "리포트에 '밸류에이션 부담' 혹은 '상방 저항' 키워드가 누락된 경우 경고를 추가하고 매수 등급을 하향 검토할 것", "required_keywords": ["밸류에이션 부담", "상방 저항"]}}
+{{
+  "rule_id": "{next_id}",
+  "when": [
+    {{"feature": "pe", "op": "gt", "value": 40}},
+    {{"feature": "peg", "op": "gte", "value": 1.5}}
+  ],
+  "action": "penalize"
+}}
 
 출력 JSON:"""
     
@@ -166,13 +282,23 @@ def run_weekly_evolution():
     try:
         rule_data = json.loads(clean_json)
         rule_id = rule_data.get("rule_id", next_id)
-        rule_text = rule_data.get("rule_text", "")
-        check_condition = rule_data.get("check_condition", "")
         
-        if rule_text and check_condition:
-            # 4. DB에 적재
-            save_learned_rule(rule_id, rule_text, check_condition)
+        # 신규 백테스터 및 유효성 검증
+        from learning.structured_rules import validate_rule_schema
+        from learning.rule_backtester import backtest_rule
+        
+        # 1) LLM이 제안한 구조화 규칙의 검증
+        validate_rule_schema(rule_data)
+        
+        # 2) 과거 데이터 기반 백테스팅
+        stats_report = backtest_rule(rule_data)
+        
+        # 3) 통계적으로 유의미한 경우 (PROMOTE) 에만 shadow로 등록
+        if stats_report["verdict"] == "PROMOTE":
+            save_learned_rule(rule_data, status="shadow", stats=stats_report)
+            print(f"✅ [rule_evolution.py] 규칙 {rule_id}가 통계적 유의성이 검증되어 shadow로 등록되었습니다.")
         else:
-            print("   ⚠️ [rule_evolution.py] AI 출력 JSON 내 필수 필드가 누락되었습니다.")
+            print(f"❌ [rule_evolution.py] 규칙 {rule_id}는 유의미성 검증에 실패하여 reject 되었습니다. 사유: {stats_report['reason']}")
+            
     except Exception as e:
-        print(f"   ⚠️ [rule_evolution.py] AI 응답 JSON 파싱 실패: {e}\n   AI 원문:\n{ai_response}")
+        print(f"   ⚠️ [rule_evolution.py] AI 응답 파싱 및 규칙 검증 실패: {e}\n   AI 원문:\n{ai_response}")

@@ -1,6 +1,6 @@
-# 🚀 AI Chunsik MK3: Dual-LLM Autonomous Portfolio Thesis Agent
+# 🚀 AI Chunsik MK4: Dual-LLM Autonomous Portfolio Thesis Agent
 
-**AI 춘식 MK3**는 시장의 핵심 지표(재무, 수급, 기술적 타점) 분석을 바탕으로 로컬 **듀얼 LLM(Dual-LLM)** 협동 아키텍처를 가동하여 투자 포트폴리오의 **Thesis Map(투자 가설)**을 스스로 수립하고, 24시간 실시간 뉴스 모멘텀을 감시하여 투자 가설 훼손(Kill Condition) 여부를 실시간으로 판별 및 경고하는 상시 밀착형 지능형 퀀트 투자 에이전트입니다.
+**AI 춘식 MK4**는 시장의 핵심 지표(재무, 수급, 기술적 타점) 분석을 바탕으로 로컬 **듀얼 LLM(Dual-LLM)** 협동 아키텍처를 가동하여 투자 포트폴리오의 **Thesis Map(투자 가설)**을 스스로 수립하고, 24시간 실시간 뉴스 모멘텀을 감시하여 투자 가설 훼손(Kill Condition) 여부를 실시간으로 판별 및 경고하는 상시 밀착형 지능형 퀀트 투자 에이전트입니다.
 
 특히, 예측 성과와 실제 수익률 피드백을 비교 분석하여 스스로 규칙을 수정 및 정교화하는 **자가학습(Self-Learning & Evolution) 피드백 루프**를 장착하고 있습니다.
 
@@ -41,7 +41,13 @@ graph TD
 
 ---
 
-## ✨ AI 춘식 MK3 핵심 개선 사항 (Key Features)
+## ✨ AI 춘식 MK4 핵심 개선 사항 (Key Features)
+
+### 🛡️ 0. 가짜 데이터 차단 및 실효적 자가학습 (MK4 개편 사항)
+*   **가짜 데이터 차단 및 Provenance 추적**: LLM이나 네트워크 장애 시 하드코딩된 수치로 리포트를 생성하지 않으며, 데이터 출처 신뢰성을 입증하는 `Provenance` 모듈을 도입했습니다. 데이터 누락 또는 LLM 응답 불가 시 `is_degraded`로 마킹하여 학습 DB 격리 및 최종 보고서 상단에 오염 차단 경고 배너를 강제 렌더링합니다.
+*   **통계적 규칙 백테스팅 게이트**: 자가학습 시 무작위로 규칙을 양산하는 것을 차단하기 위해, 과거 200여 개의 결정 흔적(`decision_traces`) 데이터를 연계한 **부트스트랩 95% 신뢰구간(Bootstrap 95% CI) 백테스터 게이트**를 이식하여 통계적으로 검증된 유효 규칙만 적재합니다.
+*   **Shadow/Active 룰 라이프사이클 관리**: 신규 진화된 룰은 즉시 반영되지 않고 `Shadow` 단계로 기입되어 성과 추적 후 95% 신뢰구간을 넘어서야 `Active`로 승격되고, 저성과 지속 시 퇴출되는 라이프사이클 시스템을 도입했습니다.
+
 
 ### 📡 1. 토스증권 API 실시간 시세 연동 및 yfinance 이중화 폴백 (Toss Securities API Integration)
 *   **실시간 수급 정보**: `.env`에 정의된 `TOSS_CLIENT_ID` 및 `TOSS_CLIENT_SECRET`를 참조하여 실시간으로 OAuth2 토큰을 발급/갱신하고 시세를 조회하는 [toss_client.py](file:///Users/leeseungjun/coding/%ED%88%AC%EC%9E%90%20%EC%9D%98%EC%82%AC%EA%B2%B0%EA%B2%B0%EC%A0%95%20%EB%B3%B4%EC%A1%B0%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%B6%98%EC%8B%9D%20MK3/core/toss_client.py)를 신설했습니다.

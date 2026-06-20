@@ -19,55 +19,17 @@ from core.llm_client import clean_untrusted_text, OllamaUnavailable
 from core.llm_client import call_ollama as _call_ollama_raw
 
 
-def call_ollama(prompt, model_type="heavy"):
+def call_ollama(prompt, model_type="heavy", timeout=60):
     """
     로컬 Ollama 서버와 통신하여 전체 텍스트 응답을 반환합니다.
-    (공통 클라이언트를 사용하며, 최종 실패 시 고품질 Mock-up 리포트로 폴백)
+    (공통 클라이언트를 사용하며, 최종 실패 시 None 반환)
     """
     try:
-        return _call_ollama_raw(prompt, model_type=model_type)
+        return _call_ollama_raw(prompt, model_type=model_type, timeout=timeout)
     except OllamaUnavailable:
-        print("⚠️ [call_ollama] Ollama 응답 실패 — 오프라인 폴백 리포트를 생성합니다.")
-        return _build_fallback_report(prompt)
+        print("⚠️ [call_ollama] Ollama 응답 실패 — None을 반환합니다.")
+        return None
 
-
-def _build_fallback_report(prompt):
-    """[무중단 최종 수비막] 프롬프트 텍스트에서 종목 정보를 파싱해 고품질 모크 브리핑을 생성합니다."""
-    ticker = "UNKNOWN"
-    signal = "관망"
-    sector = "Unknown"
-    sub_sector = "General"
-    bullish_pct = "62.8%"
-    
-    for line in prompt.splitlines():
-        if "티커:" in line or "- 티커:" in line:
-            ticker = line.split("티커:")[-1].replace(":", "").strip().split()[0].replace("(", "").replace(")", "")
-        elif "기술적 타점:" in line or "- 기술적 타점:" in line:
-            signal = line.split("기술적 타점:")[-1].replace(":", "").strip()
-        elif "소속 섹터:" in line or "- 표기 소속 섹터:" in line:
-            sector = line.split("섹터:")[-1].replace(":", "").strip()
-        elif "세부 소속 테마:" in line or "- 세부 소속 테마:" in line:
-            sub_sector = line.split("테마:")[-1].replace(":", "").strip().split()[0]
-        elif "Bullish 비율:" in line or "Bullish:" in line:
-            bullish_pct = line.split("비율:")[-1].replace(":", "").strip().split()[0]
-
-    fallback_report = f"""### 📊 [퀀트 검증 리포트 (로컬 AI 오프라인 폴백)] {ticker} ({sector} / {sub_sector})
-본 종목은 미국 증시 탑다운 자금 분석 및 {ticker} 전용 멀티타임프레임 스토캐스틱 파동 정량 검증을 통과한 핵심 분석 대상입니다. (로컬 AI 연동 지연으로 퀀트 템플릿 복사본을 임시 출력합니다.)
-
-#### 1. 투자 핵심 요약
-- **매매 신호**: {signal}
-- **핵심 요약**: 소속 세부 테마인 **[{sub_sector}]**의 경기 사이클 모멘텀과 기술적 수급 진입 타점이 조화를 이루고 있는 매력적인 구간입니다. 기관 및 퀀트 자금의 유입에 힘입어 단기 상방 에너지가 유효한 상태입니다.
-
-#### 2. 상승 촉매제 (Catalyst) 및 소셜 감성
-- **소셜 심리 상태**: **Bullish {bullish_pct}** (StockTwits 긍정 여론 우세)
-- **모멘텀 촉매**: 실시간 커뮤니티(Reddit/StockTwits)에서 언급량이 폭증하며 개미들의 매수세 유입(FOMO)이 강화되고 있습니다. 주봉상의 장기 상승추세 하에서 일봉 및 4시간봉의 기술적 스토캐스틱 파동 에너지가 강하게 폭발하여 단기 타점상 매우 유리합니다.
-
-#### 3. 잠재적 리스크 및 가드레일 전략
-- **리스크 경고**: 최근 단기 과열 구간에 진입하여 역사적 P/E 밴드의 상단에 위치하고 있으며, 소셜 밈(Meme) 화로 인한 고변동성 리스크가 공존합니다. 
-- **트레이딩 가이드**: 자산의 5%~10% 비중 내에서 철저히 분할 진입을 권고합니다.
-- **기계적 손절**: 사전에 정의된 종목 고유의 변동성(Beta) 기반 **기계적 손절선 수칙을 절대적 가이드라인으로 준수**하여 철저히 대응하십시오."""
-    
-    return fallback_report
 
 
 def generate_ai_narrative(candidate, leading_sectors=None):
@@ -138,20 +100,35 @@ def generate_ai_narrative(candidate, leading_sectors=None):
 
     social_str = ""
     social_info = candidate.get('social_sentiment')
-    if social_info:
-        bull_pct = social_info.get('stocktwits_bullish_pct', 50.0)
-        total_st = social_info.get('stocktwits_total', 0)
-        st_msgs = social_info.get('stocktwits_samples', [])
-        reddit_posts = social_info.get('reddit_posts', [])
+    if social_info and isinstance(social_info, dict):
+        st_prov = social_info.get('stocktwits')
+        rd_prov = social_info.get('reddit')
         
-        st_sample_str = "\n".join([f"  - Feed: {clean_untrusted_text(m)}" for m in st_msgs[:3]]) if st_msgs else "  - 피드 샘플 없음"
-        reddit_sample_str = ""
-        if reddit_posts:
-            reddit_sample_str = "\n".join([f"  - [{p['subreddit']}] {clean_untrusted_text(p['title'])} (Score: {p['score']})" for p in reddit_posts[:3]])
-        else:
-            reddit_sample_str = "  - 최근 언급 포스트 없음"
+        missing_sources = candidate.setdefault('missing_sources', [])
+        
+        st_usable = st_prov and st_prov.is_usable
+        rd_usable = rd_prov and rd_prov.is_usable
+        
+        if st_prov and not st_usable:
+            missing_sources.append("stocktwits")
+        if rd_prov and not rd_usable:
+            missing_sources.append("reddit")
+
+        if st_usable and rd_usable:
+            st_val = st_prov.value
+            bull_pct = st_val.get('bullish_pct', 50.0)
+            total_st = st_val.get('total_count', 0)
+            st_msgs = st_val.get('messages', [])
+            reddit_posts = rd_prov.value
             
-        social_str = f"""[🌐 실시간 소셜 미디어 감성 정보]
+            st_sample_str = "\n".join([f"  - Feed: {clean_untrusted_text(m)}" for m in st_msgs[:3]]) if st_msgs else "  - 피드 샘플 없음"
+            reddit_sample_str = ""
+            if reddit_posts:
+                reddit_sample_str = "\n".join([f"  - [{p['subreddit']}] {clean_untrusted_text(p['title'])} (Score: {p['score']})" for p in reddit_posts[:3]])
+            else:
+                reddit_sample_str = "  - 최근 언급 포스트 없음"
+                
+            social_str = f"""[🌐 실시간 소셜 미디어 감성 정보]
 - StockTwits Bullish 비율: **{bull_pct}%** (총 피드 수: {total_st}개)
 - StockTwits 최신 여론 요약:
 {social_start}
@@ -161,6 +138,10 @@ def generate_ai_narrative(candidate, leading_sectors=None):
 {social_start}
 {reddit_sample_str}
 {social_end}"""
+        else:
+            social_str = "[🌐 소셜 감성] ⚠️ 수집 실패: 데이터 없음 (분석 미반영)"
+    else:
+        social_str = "[🌐 소셜 감성] ⚠️ 수집 실패: 데이터 없음 (분석 미반영)"
 
     # 공통 프롬프트 헤더 (클로드 지적사항 완벽 반영 지침)
     base_guideline = f"""[절대 준수 지침]
@@ -292,7 +273,14 @@ def generate_ai_narrative(candidate, leading_sectors=None):
     ai_response = call_ollama(prompt)
     
     result = dict(candidate)
-    result['ai_briefing'] = ai_response
+    if ai_response is None:
+        result['ai_briefing'] = "🚫 로컬 AI 분석 불가 (데이터 없음 — 학습 제외 대상)"
+        result['is_degraded'] = True
+        result.setdefault('missing_sources', []).append("CRITICAL:ollama")
+    else:
+        result['ai_briefing'] = ai_response
+        result['is_degraded'] = False
+        
     return result
 
 
@@ -414,7 +402,18 @@ def generate_bulk_ai_narrative(candidates: list, leading_sectors=None) -> list:
 한국어로 전문적인 퀀트 리포트 양식에 맞춰 출력하십시오."""
 
     print(f"🤖 [Bulk Prompting] {len(candidates)}개 종목 통합 프롬프트 Ollama 전송 중...")
-    bulk_response = call_ollama(bulk_prompt)
+    bulk_response = call_ollama(bulk_prompt, timeout=240)
+
+    if bulk_response is None:
+        print("⚠️ [Bulk Prompting] Ollama 응답 실패 - 모든 후보에 degraded 설정 적용")
+        results = []
+        for candidate in candidates:
+            result = dict(candidate)
+            result['ai_briefing'] = "🚫 로컬 AI 분석 불가 (데이터 없음 — 학습 제외 대상)"
+            result['is_degraded'] = True
+            result.setdefault('missing_sources', []).append("CRITICAL:ollama")
+            results.append(result)
+        return results
 
     # 구분자 기반 응답 파싱
     sections = bulk_response.split(BULK_SEPARATOR)
@@ -428,6 +427,7 @@ def generate_bulk_ai_narrative(candidates: list, leading_sectors=None) -> list:
         for idx, candidate in enumerate(candidates):
             result = dict(candidate)
             result['ai_briefing'] = parsed_reports[idx] if idx < len(parsed_reports) else parsed_reports[-1]
+            result['is_degraded'] = False
             results.append(result)
         return results
     else:

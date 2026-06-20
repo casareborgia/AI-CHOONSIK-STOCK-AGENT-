@@ -3,20 +3,20 @@
 cd "$(dirname "$0")"
 
 echo "=================================================="
-echo "🤖 [AI 춘식 MK3] 자동화 스케줄러(LaunchAgent) 기동 중..."
+echo "🤖 [AI 춘식 MK4] 자동화 스케줄러(LaunchAgent) 기동 중..."
 echo "=================================================="
 
 # 혹시 기존에 nohup 등으로 직접 띄운 프로세스가 남아있다면 완전히 정리
 pkill -f "caffeinate.*auto_runner.py" 2>/dev/null
 pkill -f auto_runner.py 2>/dev/null
 
-PLIST_PATH="$HOME/Library/LaunchAgents/com.chunsik.autorun.mk3.plist"
+PLIST_PATH="$HOME/Library/LaunchAgents/com.chunsik.autorun.mk4.plist"
 
 # plist가 LaunchAgents 폴더에 없거나 다르면 최신화 및 로드
-if [ ! -f "$PLIST_PATH" ] || ! cmp -s "com.chunsik.autorun.mk3.plist" "$PLIST_PATH"; then
+if [ ! -f "$PLIST_PATH" ] || ! cmp -s "com.chunsik.autorun.mk4.plist" "$PLIST_PATH"; then
     echo "📡 LaunchAgent 등록을 최신화합니다..."
     mkdir -p "$HOME/Library/LaunchAgents"
-    cp com.chunsik.autorun.mk3.plist "$PLIST_PATH"
+    cp com.chunsik.autorun.mk4.plist "$PLIST_PATH"
     launchctl unload "$PLIST_PATH" 2>/dev/null
     launchctl load "$PLIST_PATH"
     echo "✅ LaunchAgent 서비스 등록 완료"
@@ -24,8 +24,8 @@ fi
 
 # launchd 서비스 시작 및 재부팅
 echo "📡 launchd 스케줄러 서비스를 재부팅(Restart)합니다..."
-launchctl stop com.chunsik.autorun.mk3 2>/dev/null
-launchctl start com.chunsik.autorun.mk3 2>/dev/null
+launchctl stop com.chunsik.autorun.mk4 2>/dev/null
+launchctl start com.chunsik.autorun.mk4 2>/dev/null
 
 echo "=================================================="
 echo "✅ 스케줄러가 launchd(LaunchAgent)를 통해 백그라운드에서 구동되었습니다!"
@@ -36,3 +36,4 @@ echo "=================================================="
 # 3초간 확인 메시지를 보여준 뒤 터미널 창을 닫습니다.
 sleep 3
 exit 0
+

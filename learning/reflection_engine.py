@@ -36,12 +36,13 @@ class ReflectionEngine:
         conn = get_connection()
         cursor = conn.cursor()
         try:
-            # 5/10/20 영업일 추적을 위해 DB 내 outcomes 매칭이 없거나 pending 상태인 최신 30일 이내 보고서 조회
+            # 5/10/20 영업일 추적을 위해 DB 내 outcomes 매칭이 없거나 pending 상태인 최신 30일 이내 보고서 조회 (degraded 제외)
             cursor.execute("""
                 SELECT r.id, r.date, r.ticker, r.close_price, r.revised_text, r.report_text
                 FROM reports r
                 LEFT JOIN outcomes o ON r.id = o.report_id
-                WHERE o.id IS NULL OR o.outcome = 'pending'
+                WHERE (o.id IS NULL OR o.outcome = 'pending')
+                  AND COALESCE(r.is_degraded, 0) = 0
                 ORDER BY r.date DESC
                 LIMIT 15
             """)

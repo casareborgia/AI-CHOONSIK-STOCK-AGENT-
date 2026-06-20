@@ -36,7 +36,7 @@ logger = logging.getLogger("Orchestrator")
 async def main():
     start_time = time.time()
     logger.info("================================================================================")
-    logger.info("🚀 [춘식 MK3] 멀티 에이전트 기반 투자 의사결정 보조 시스템 기동")
+    logger.info("🚀 [춘식 MK4] 멀티 에이전트 기반 투자 의사결정 보조 시스템 기동")
     logger.info("================================================================================")
 
     # 0. 지연 성찰(Deferred Reflection) 배치 구동 (사후 성과 추적)

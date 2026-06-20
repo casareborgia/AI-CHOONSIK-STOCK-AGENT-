@@ -53,7 +53,7 @@ def mark_run_completed(session_str, run_type):
 def run_orchestrator(label=""):
     """메인 오케스트레이터 프로세스를 실행하고 결과를 출력합니다."""
     timestamp = datetime.datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n[{timestamp}] 🚀 AI 춘식 MK3 파이프라인 가동 시작 ({label})...")
+    print(f"\n[{timestamp}] 🚀 AI 춘식 MK4 파이프라인 가동 시작 ({label})...")
     
     try:
         # 텔레그램 전송을 포함한 메인 오케스트레이터 실행 (python3로 실행)
@@ -115,7 +115,7 @@ def check_and_run_sessions(nyse, now_kst):
 
 def main():
     print("================================================================================")
-    print("🤖 [AI 춘식 MK3 지능형 매니저 - 상태 기반/절전 대응 버전] 가동 시작")
+    print("🤖 [AI 춘식 MK4 지능형 매니저 - 상태 기반/절전 대응 버전] 가동 시작")
     print("   - 미국 NYSE 시장 달력 연동 및 캐싱 완료")
     print("   - 상태 파일(run_state.json) 기반 누락 방지 가동")
     print("================================================================================")

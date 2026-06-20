@@ -38,6 +38,8 @@ def init_db():
         stop_loss_pct REAL,                    -- 손절선 (%)
         report_text TEXT,                      -- 젬마4가 생성한 최초 원문 리포트
         revised_text TEXT,                     -- 자동 교정/보정 완료된 최종 리포트 (수정 없으면 NULL)
+        run_id TEXT,
+        is_degraded BOOLEAN DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
@@ -105,6 +107,12 @@ def init_db():
         trigger_count INTEGER DEFAULT 0,        -- 검증 위반으로 발동된 횟수
         effectiveness REAL,                     -- 적용 후 성과 변동 영향도
         is_active BOOLEAN DEFAULT TRUE,         -- 실제 프롬프트 주입 활성화 여부
+        status TEXT DEFAULT 'active',
+        ci_low REAL,
+        ci_high REAL,
+        live_alpha REAL,
+        last_backtest_at TIMESTAMP,
+        rule_json TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -232,6 +240,32 @@ def init_db():
         except Exception as e:
             print(f"⚠️ [DB Migration] run_id 추가 실패: {e}")
 
+    if "is_degraded" not in report_cols:
+        try:
+            cursor.execute("ALTER TABLE reports ADD COLUMN is_degraded BOOLEAN DEFAULT 0")
+            print("💾 [DB Migration] reports 테이블에 is_degraded 컬럼이 추가되었습니다.")
+        except Exception as e:
+            print(f"⚠️ [DB Migration] is_degraded 추가 실패: {e}")
+
+    # learned_rules 컬럼 마이그레이션
+    cursor.execute("PRAGMA table_info(learned_rules)")
+    rule_cols = [col[1] for col in cursor.fetchall()]
+    migration_cols = {
+        "status": "TEXT DEFAULT 'active'",
+        "ci_low": "REAL",
+        "ci_high": "REAL",
+        "live_alpha": "REAL",
+        "last_backtest_at": "TIMESTAMP",
+        "rule_json": "TEXT"
+    }
+    for col_name, col_type in migration_cols.items():
+        if col_name not in rule_cols:
+            try:
+                cursor.execute(f"ALTER TABLE learned_rules ADD COLUMN {col_name} {col_type}")
+                print(f"💾 [DB Migration] learned_rules 테이블에 {col_name} 컬럼이 추가되었습니다.")
+            except Exception as e:
+                print(f"⚠️ [DB Migration] {col_name} 추가 실패: {e}")
+
     # outcomes 무결성: (report_id, days_elapsed) 중복 적재 방지 인덱스
     # (track_outcomes 복구 시 reflection과의 5일 outcome 중복/라벨 충돌을 차단)
     try:
@@ -288,16 +322,17 @@ def save_report_to_db(stock: dict, raw_report: str, revised_report: str, entry_g
     stop_pct = float(round(max(5.0, min(12.0, 5.0 * beta))))
     
     target_price = stock.get("target_price", close * 1.20)
+    is_degraded = 1 if stock.get("is_degraded", False) else 0
 
     try:
         cursor.execute("""
             INSERT INTO reports (
                 date, ticker, sector, signal_label, entry_grade, pe_ratio, peg_ratio,
-                inst_ownership, close_price, target_price, stop_loss_pct, report_text, revised_text, run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                inst_ownership, close_price, target_price, stop_loss_pct, report_text, revised_text, run_id, is_degraded
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             today_str, ticker, sector, signal, entry_grade, pe, peg,
-            inst_own, close, target_price, stop_pct, raw_report, revised_report, run_id
+            inst_own, close, target_price, stop_pct, raw_report, revised_report, run_id, is_degraded
         ))
         report_id = cursor.lastrowid
         conn.commit()
@@ -643,7 +678,7 @@ def set_system_meta(key: str, value: str):
 
 # 진화 규칙 승인/조회 헬퍼 함수
 def get_pending_rules() -> list:
-    """승인 대기 중(is_active = 0)인 evolution 규칙 목록을 가져옵니다."""
+    """승인 대기 중(status='shadow' 또는 status='proposed' 또는 is_active=0)인 evolution 규칙 목록을 가져옵니다."""
     conn = get_connection()
     cursor = conn.cursor()
     results = []
@@ -651,7 +686,7 @@ def get_pending_rules() -> list:
         cursor.execute("""
             SELECT rule_id, rule_text, source, trigger_count, effectiveness, created_at
             FROM learned_rules
-            WHERE is_active = 0 AND source = 'evolution'
+            WHERE (status = 'shadow' OR status = 'proposed' OR is_active = 0) AND source = 'evolution'
             ORDER BY created_at DESC
         """)
         rows = cursor.fetchall()
@@ -665,12 +700,12 @@ def get_pending_rules() -> list:
     return results
 
 def approve_rule(rule_id: str) -> bool:
-    """대기 규칙을 활성화(is_active = 1)로 변경합니다."""
+    """대기 규칙을 활성화(is_active = 1, status='active')로 변경합니다."""
     conn = get_connection()
     cursor = conn.cursor()
     success = False
     try:
-        cursor.execute("UPDATE learned_rules SET is_active = 1 WHERE rule_id = ?", (rule_id.upper(),))
+        cursor.execute("UPDATE learned_rules SET is_active = 1, status = 'active' WHERE rule_id = ?", (rule_id.upper(),))
         conn.commit()
         if cursor.rowcount > 0:
             success = True

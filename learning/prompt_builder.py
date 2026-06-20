@@ -19,14 +19,16 @@ def get_recent_performance_stats() -> dict:
     
     stats = {}
     try:
-        # 최근 20일 경과 기준 outcomes 데이터의 통계 연산
+        # 최근 20일 경과 기준 outcomes 데이터의 통계 연산 (degraded 제외)
         cursor.execute("""
             SELECT 
                 COUNT(*) as total_samples,
-                AVG(return_pct) as avg_ret,
-                SUM(CASE WHEN outcome = 'win' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rt
-            FROM outcomes
-            WHERE created_at >= date('now', '-30 days') AND days_elapsed = 20
+                AVG(o.return_pct) as avg_ret,
+                SUM(CASE WHEN o.outcome = 'win' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rt
+            FROM outcomes o
+            JOIN reports r ON o.report_id = r.id
+            WHERE o.created_at >= date('now', '-30 days') AND o.days_elapsed = 20
+              AND COALESCE(r.is_degraded, 0) = 0
         """)
         row = cursor.fetchone()
         
@@ -68,8 +70,8 @@ def load_active_learned_rules_text() -> str:
         cursor.execute("""
             SELECT rule_id, rule_text 
             FROM learned_rules 
-            WHERE is_active = 1
-            ORDER BY rule_id ASC
+            WHERE status = 'active'
+            ORDER BY live_alpha DESC, rule_id ASC
         """)
         rows = cursor.fetchall()
         

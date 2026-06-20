@@ -27,6 +27,7 @@ import yfinance as yf
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import config
 from core.fundamental_filter import get_cached_ticker_info
+from learning.data_quality import Provenance, DataStatus
 
 
 def validate_url(url: str) -> bool:
@@ -281,14 +282,8 @@ async def get_social_candidates():
     cands = list(merged_dict.values())
     
     if not cands:
-        print("🔄 실시간 통신 타임아웃. 3차 방어선(정제된 핵심 밈 풀) 가동...")
-        cands = [
-            {'ticker': 'PLTR', 'name': 'Palantir Technologies Inc.', 'mentions': 120, 'sector': 'Technology', 'track': 'Track B'},
-            {'ticker': 'TSLA', 'name': 'Tesla Inc.', 'mentions': 110, 'sector': 'Consumer Cyclical', 'track': 'Track B'},
-            {'ticker': 'NVDA', 'name': 'NVIDIA Corporation', 'mentions': 105, 'sector': 'Technology', 'track': 'Track B'},
-            {'ticker': 'GME', 'name': 'GameStop Corp.', 'mentions': 95, 'sector': 'Consumer Discretionary', 'track': 'Track B'},
-            {'ticker': 'RDDT', 'name': 'Reddit Inc.', 'mentions': 80, 'sector': 'Communication Services', 'track': 'Track B'}
-        ]
+        print("🔄 실시간 통신 타임아웃. 빈 리스트 반환 (가짜 데이터 차단)...")
+        cands = []
         
     min_mentions = config.SNS_PRESETS.get('min_mentions', 20)
     max_cands = config.SNS_PRESETS.get('max_candidates', 5)
@@ -301,10 +296,10 @@ async def get_social_candidates():
     return results
 
 
-def fetch_target_stocktwits_sentiment(ticker: str, limit: int = 15) -> dict:
+def fetch_target_stocktwits_sentiment(ticker: str, limit: int = 15) -> Provenance:
     """
     특정 티커의 StockTwits Symbol Stream API를 찔러 긍/부정 비율 및 최신 의견 샘플을 수집합니다.
-    (API 차단 혹은 네트워크 장애 시 안전 모크업 데이터로 자가 복구)
+    (성공 시 Provenance.live, 실패 시 Provenance.unavailable 반환)
     """
     url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker.upper()}.json"
     headers = {
@@ -315,7 +310,7 @@ def fetch_target_stocktwits_sentiment(ticker: str, limit: int = 15) -> dict:
     
     result = {"bullish_pct": 50.0, "total_count": 0, "messages": []}
     if not validate_url(url):
-        raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
+        return Provenance.unavailable("stocktwits", f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     try:
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -339,33 +334,23 @@ def fetch_target_stocktwits_sentiment(ticker: str, limit: int = 15) -> dict:
             result["messages"] = samples[:5] # 대표 샘플 5개만 추출
             if total > 0:
                 result["bullish_pct"] = round((bull_cnt / total) * 100, 1)
+        return Provenance.live("stocktwits", result)
     except Exception as e:
-        print(f"⚠️ StockTwits {ticker} 상세 감성 분석 실패 (보안 차단 대비 Mock-up 스위칭): {e}")
-        result = {
-            "bullish_pct": 62.8,
-            "total_count": 35,
-            "messages": [
-                f"${ticker.upper()} showing steady volume consolidation near key support levels.",
-                f"Loading up more shares of ${ticker.upper()} ahead of the next market catalyst.",
-                f"Is anyone else watching ${ticker.upper()}? Stochastic waves look ready to breakout.",
-                f"The valuation limit on ${ticker.upper()} seems reasonable at this support zone.",
-                f"Retail sentiment shifting strongly bullish on ${ticker.upper()} today."
-            ]
-        }
-        
-    return result
+        print(f"⚠️ StockTwits {ticker} 상세 감성 분석 실패: {e}")
+        return Provenance.unavailable("stocktwits", str(e))
 
 
-def fetch_target_reddit_sentiment(ticker: str, subreddits=("wallstreetbets", "stocks", "investing"), limit=5) -> list:
+def fetch_target_reddit_sentiment(ticker: str, subreddits=("wallstreetbets", "stocks", "investing"), limit=5) -> Provenance:
     """
     지정한 Reddit 금융 서브레딧들에서 특정 티커를 검색해 최근 언급 포스트들의 제목을 수집합니다.
-    (API 차단 혹은 네트워크 장애 시 안전 모크업 데이터로 자가 복구)
+    (성공 시 Provenance.live, 실패 시 Provenance.unavailable 반환)
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'application/json'
     }
     posts_collected = []
+    errors = []
     
     for sub in subreddits:
         qs = urllib.parse.urlencode({
@@ -377,7 +362,8 @@ def fetch_target_reddit_sentiment(ticker: str, subreddits=("wallstreetbets", "st
         })
         url = f"https://www.reddit.com/r/{sub}/search.json?{qs}"
         if not validate_url(url):
-            raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
+            errors.append(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
+            continue
         req = urllib.request.Request(url, headers=headers)
         
         try:
@@ -394,31 +380,14 @@ def fetch_target_reddit_sentiment(ticker: str, subreddits=("wallstreetbets", "st
                         "num_comments": p.get("num_comments", 0)
                     })
         except Exception as e:
-            print(f"⚠️ Reddit r/{sub} {ticker} 상세 검색 실패 (보안 차단 대비 Mock-up 스위칭): {e}")
+            print(f"⚠️ Reddit r/{sub} {ticker} 상세 검색 실패: {e}")
+            errors.append(f"r/{sub} failed: {str(e)}")
 
-    if not posts_collected:
-        posts_collected = [
-            {
-                "subreddit": "wallstreetbets",
-                "title": f"Why is retail piling into {ticker.upper()} options right now?",
-                "score": 185,
-                "num_comments": 94
-            },
-            {
-                "subreddit": "stocks",
-                "title": f"A comprehensive fundamental case for holding {ticker.upper()} in this environment",
-                "score": 112,
-                "num_comments": 56
-            },
-            {
-                "subreddit": "investing",
-                "title": f"Thoughts on {ticker.upper()} valuation compared to historical sector average?",
-                "score": 45,
-                "num_comments": 29
-            }
-        ]
-            
-    return posts_collected
+    if posts_collected:
+        return Provenance.live("reddit", posts_collected)
+    else:
+        err_msg = "; ".join(errors) if errors else "No posts found"
+        return Provenance.unavailable("reddit", err_msg)
 
 
 if __name__ == "__main__":
@@ -428,10 +397,16 @@ if __name__ == "__main__":
         
     print("\n--- Target Ticker (AAPL) Social Detail Sentiment Test ---")
     st_res = fetch_target_stocktwits_sentiment("AAPL")
-    print(f"StockTwits AAPL Bullish %: {st_res['bullish_pct']}% (Total: {st_res['total_count']})")
-    print(f"StockTwits Samples: {st_res['messages']}")
+    if st_res.is_usable:
+        print(f"StockTwits AAPL Bullish %: {st_res.value['bullish_pct']}% (Total: {st_res.value['total_count']})")
+        print(f"StockTwits Samples: {st_res.value['messages']}")
+    else:
+        print(f"StockTwits AAPL Sentiment Unavailable: {st_res.detail}")
     
     rd_res = fetch_target_reddit_sentiment("AAPL")
-    print(f"Reddit AAPL Search Results (Count: {len(rd_res)}):")
-    for post in rd_res[:3]:
-        print(f" - [{post['subreddit']}] {post['title']} (Score: {post['score']})")
+    if rd_res.is_usable:
+        print(f"Reddit AAPL Search Results (Count: {len(rd_res.value)}):")
+        for post in rd_res.value[:3]:
+            print(f" - [{post['subreddit']}] {post['title']} (Score: {post['score']})")
+    else:
+        print(f"Reddit AAPL Sentiment Unavailable: {rd_res.detail}")

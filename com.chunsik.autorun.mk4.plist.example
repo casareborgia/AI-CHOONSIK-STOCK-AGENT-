@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.chunsik.autorun.mk3</string>
+    <string>com.chunsik.autorun.mk4</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/caffeinate</string>

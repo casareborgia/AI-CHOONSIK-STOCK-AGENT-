@@ -181,6 +181,9 @@ class TelegramAgent(BaseAgent):
                 
                 info, company_name = await asyncio.to_thread(get_yf_info, ticker)
                 thesis_data = await asyncio.to_thread(generate_initial_thesis_map, ticker, company_name, info)
+                if thesis_data is None:
+                    await self.send_response(f"❌ [{ticker}] 로컬 AI 연동 지연으로 최초 Thesis Map 생성이 불가합니다.")
+                    return
                 success = add_or_update_thesis(ticker, company_name, thesis_data)
                 
                 if success:

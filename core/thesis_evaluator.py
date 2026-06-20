@@ -60,20 +60,9 @@ def generate_initial_thesis_map(ticker: str, name: str, info: dict) -> dict:
     
     ai_response = call_ollama(prompt)
     
-    # Ollama 오프라인 폴백 처리
-    if ai_response == "Ollama 연동 실패":
-        fallback_summary = business_summary[:200] + "..." if len(business_summary) > 200 else business_summary
-        return {
-            "investment_thesis": f"[오프라인 생성 초안] {name}({ticker})은 {sector}/{industry} 분야의 선도 기업입니다. 비즈니스 개요: {fallback_summary}",
-            "key_indicators": f"매출 성장률, 영업이익률, P/E ratio(현재 Trailing P/E: {pe})",
-            "catalysts": "신규 주력 비즈니스 매출 침투 가속화 및 주요 인프라 투자 발표",
-            "risks": "동종 테크 경쟁사의 신기술 침투 리스크 및 거시경제 금리 영향",
-            "kill_condition": "경쟁사의 파괴적 기술 도입으로 인한 시장 점유율 20% 이상 하락 또는 FCF 적자 전환",
-            "noise_rules": "단기 수급에 의한 주가 등락, 단순 학회/컨퍼런스 연설, 마진 변동이 없는 보도자료",
-            "earnings_checkpoints": "실적 발표 시 가이던스 상향 여부, 마진 회복율 추세 확인",
-            "valuation_criteria": f"Trailing P/E 역사적 평균 대비 프리미엄 분석 (현재 P/E: {pe})",
-            "one_line_conclusion": f"장기 테마 성장 수혜주로 분석되어, {ticker}의 주요 Thesis 변동 사항을 지속 감시합니다."
-        }
+    # Ollama 오프라인 폴백 처리 (가짜 데이터 생성 차단)
+    if ai_response == "Ollama 연동 실패" or ai_response is None:
+        return None
     
     # AI 응답을 9가지 항목 딕셔너리로 파싱하는 간단한 파서
     lines = ai_response.splitlines()
@@ -200,18 +189,10 @@ def evaluate_thesis_change(ticker: str, thesis_map: dict, news_list: list) -> di
 
     ai_response = call_ollama(prompt)
     
-    if ai_response == "Ollama 연동 실패":
-        first_title = news_list[0]['title'] if news_list else "최근 관련 이슈 발생"
-        fallback_text = f"""1. 티커 / 이벤트 제목: {ticker} / {first_title}
-2. 확정 사실: 로컬 AI 서버 연동 일시 지연으로 자동 분석을 폴백 처리합니다. 최근 뉴스: {first_title}
-3. 추론: 실질적인 이익/비즈니스 해자 훼손 여부는 확인이 어렵습니다.
-4. 분류: Neutral (오프라인 상태)
-5. 기존 thesis 대비 변화: (정밀 분석 대기) 최근 발생한 뉴스 이벤트가 기존 투자 이유에 치명적인 영향을 미칠 만한 증거는 아직 파악되지 않았습니다.
-6. 홀딩/주의/비중조절/Kill 여부: 홀딩 강화 신호 (추가 확인 필요)
-7. 다음에 확인해야 할 것: 텔레그램 `/check {ticker}` 명령어를 통해 AI 상태 복구 후 재확인하십시오."""
+    if ai_response == "Ollama 연동 실패" or ai_response is None:
         return {
-            "has_change": True,
-            "evaluation_text": fallback_text
+            "has_change": False,
+            "evaluation_text": "🚫 로컬 AI 연동 지연으로 실시간 Thesis 변화 분석 불가"
         }
         
     # 젬마의 판단 요약 및 결과 분리
