@@ -18,8 +18,8 @@ class TestTossClient(unittest.TestCase):
     def setUp(self):
         # 테스트 전용 TossClient 인스턴스 생성
         self.client = TossClient()
-        self.client.client_id = "test_client_id"
-        self.client.client_secret = "test_client_secret"
+        self.client.client_id = os.getenv("TOSS_CLIENT_ID", "mock_toss_client_id")
+        self.client.client_secret = os.getenv("TOSS_CLIENT_SECRET", "mock_toss_client_secret")
 
     @patch("httpx.Client.post")
     def test_fetch_access_token_success(self, mock_post):

@@ -29,6 +29,31 @@ import config
 from core.fundamental_filter import get_cached_ticker_info
 
 
+def validate_url(url: str) -> bool:
+    """SSRF 방지를 위해 허용된 신뢰할 수 있는 도메인(StockTwits, Reddit, Toss)만 요청하도록 검증합니다."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        
+        allowed_domains = {
+            "api.stocktwits.com",
+            "www.reddit.com",
+            "tossinvest.com"
+        }
+        
+        hostname_lower = hostname.lower()
+        if hostname_lower in allowed_domains:
+            return True
+        for domain in allowed_domains:
+            if hostname_lower.endswith("." + domain):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def fetch_stocktwits_trending():
     """
     [1차 방어선] StockTwits 실시간 트렌딩 API를 호출하여 티커 목록을 파싱합니다.
@@ -40,6 +65,8 @@ def fetch_stocktwits_trending():
     req = urllib.request.Request(url, headers=headers)
     
     candidates = []
+    if not validate_url(url):
+        raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     try:
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -74,6 +101,8 @@ def fetch_reddit_wsb_json():
     req = urllib.request.Request(url, headers=headers)
     
     ticker_counts = {}
+    if not validate_url(url):
+        raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     try:
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -143,6 +172,8 @@ def fetch_toss_popular_shares() -> list:
     req = urllib.request.Request(url, headers=headers)
     
     candidates = []
+    if not validate_url(url):
+        raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     try:
         with urllib.request.urlopen(req, timeout=8) as response:
             html = response.read().decode('utf-8')
@@ -283,6 +314,8 @@ def fetch_target_stocktwits_sentiment(ticker: str, limit: int = 15) -> dict:
     req = urllib.request.Request(url, headers=headers)
     
     result = {"bullish_pct": 50.0, "total_count": 0, "messages": []}
+    if not validate_url(url):
+        raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     try:
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
@@ -343,6 +376,8 @@ def fetch_target_reddit_sentiment(ticker: str, subreddits=("wallstreetbets", "st
             "limit": limit
         })
         url = f"https://www.reddit.com/r/{sub}/search.json?{qs}"
+        if not validate_url(url):
+            raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
         req = urllib.request.Request(url, headers=headers)
         
         try:

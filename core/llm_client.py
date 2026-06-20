@@ -9,8 +9,30 @@ import json
 import re
 import time
 import urllib.request
+import urllib.parse
 
 import config
+
+
+def validate_url(url: str) -> bool:
+    """SSRF 방지를 위해 URL의 호스트네임이 허용된 Ollama 엔드포인트 도메인인지 검증합니다."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        
+        # 1. 설정된 OLLAMA_ENDPOINT 호스트와 매칭되는지 확인
+        endpoint_host = urllib.parse.urlparse(config.OLLAMA_ENDPOINT).hostname
+        if endpoint_host and hostname.lower() == endpoint_host.lower():
+            return True
+            
+        # 2. 로컬호스트 등 기본 검증
+        if hostname.lower() in {"localhost", "127.0.0.1"}:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class OllamaUnavailable(Exception):
@@ -35,6 +57,8 @@ def call_ollama(prompt: str, model_type: str = "heavy", timeout: int = 60, max_r
     (폴백 동작은 호출 측에서 정책에 맞게 처리한다.)
     """
     url = config.OLLAMA_ENDPOINT
+    if not validate_url(url):
+        raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     target_model = config.HEAVY_LLM_MODEL if model_type == "heavy" else config.LIGHT_LLM_MODEL
     payload = {
         "model": target_model,
