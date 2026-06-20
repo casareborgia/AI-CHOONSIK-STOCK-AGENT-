@@ -87,9 +87,16 @@ class ScreenerAgent(BaseAgent):
                     await self.publish("system/done", {"status": "no_candidates"})
                     return
 
-                # 스캔 결과 발행 (이전 데이터 캐리오버)
+                # [Memory Diet] 다음 단계(TechnicalAgent)에 필요한 핵심 필드만 전달
+                SCREENER_FORWARD_KEYS = [
+                    'ticker', 'name', 'sector', 'disp_sector', 'sub_sector',
+                    'sub_sector_desc', 'pe', 'peg', 'ev_ebitda', 'inst_own',
+                    'fcf', 'close', 'high_52w', 'beta', 'track', 'mentions'
+                ]
+                slim_candidates = self.slim_candidates(union_candidates, SCREENER_FORWARD_KEYS)
+                self.logger.info(f"[Memory Diet] 후보 데이터 슬림화 완료: {len(union_candidates)}종목, {len(SCREENER_FORWARD_KEYS)}개 핵심 필드만 전달")
                 result_msg = {
-                    "union_candidates": union_candidates,
+                    "union_candidates": slim_candidates,
                     "leading_names": leading_names,
                     "sub_theme_results": sub_theme_results
                 }

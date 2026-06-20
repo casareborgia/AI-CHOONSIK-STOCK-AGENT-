@@ -17,7 +17,19 @@ logger = logging.getLogger("ReflectionEngine")
 
 class ReflectionEngine:
     def __init__(self, concurrency: int = 3):
-        self.semaphore = asyncio.Semaphore(concurrency)
+        self.concurrency = concurrency
+        self._semaphore = None
+
+    @property
+    def semaphore(self):
+        if self._semaphore is None:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            self._semaphore = asyncio.Semaphore(self.concurrency)
+        return self._semaphore
 
     def get_pending_reports(self):
         """성과 평가가 누락되었거나 pending 상태인 보고서 목록을 가져옵니다."""

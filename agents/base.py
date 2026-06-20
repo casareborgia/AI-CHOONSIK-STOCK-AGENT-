@@ -18,6 +18,17 @@ class BaseAgent(ABC):
         self._main_task = None
         self.logger = logging.getLogger(self.name)
 
+    # ── [ChatDev Memory Management] 메시지 슬림화 유틸리티 ──────────────
+    @staticmethod
+    def slim_message(message: dict, keep_keys: list) -> dict:
+        """다음 에이전트에게 전달할 메시지에서 핵심 키만 남기고 불필요한 로우 데이터를 제거합니다."""
+        return {k: message[k] for k in keep_keys if k in message}
+
+    @staticmethod
+    def slim_candidates(candidates: list, keep_keys: list) -> list:
+        """후보 종목 리스트에서 다음 단계에 필요한 핵심 필드만 추출합니다."""
+        return [{k: c[k] for k in keep_keys if k in c} for c in candidates]
+
     async def subscribe(self, channel: str):
         """
         특정 채널을 구독합니다.

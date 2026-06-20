@@ -153,6 +153,10 @@ async def main():
         # 에이전트들을 안전하게 정지
         await asyncio.gather(*(agent.stop() for agent in agents))
 
+        # [Memory Diet] 파이프라인 종료 후 공유 메모리 정리
+        await broker.cleanup_stale_payloads(max_age=0)
+        logger.info("[Memory Diet] 공유 메모리 정리 완료.")
+
     elapsed = time.time() - start_time
     logger.info("================================================================================")
     if result.get("status") == "success":

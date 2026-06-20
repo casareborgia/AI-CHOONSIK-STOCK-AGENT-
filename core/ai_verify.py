@@ -298,19 +298,146 @@ def generate_ai_narrative(candidate, leading_sectors=None):
 
 def run_ai_verification(candidates, leading_sectors=None):
     """
-    시그널이 포착된 후보군 전체를 대상으로 AI 브리핑 리스트를 생성합니다.
+    [Bulk Prompting] 시그널이 포착된 후보군 전체를 대상으로 AI 브리핑 리스트를 생성합니다.
+    동일 트랙 소속 종목들을 묶어 1회 LLM 호출로 통합 분석하여 통신 오버헤드를 최소화합니다.
+    종목 수가 1개이거나 벌크 파싱이 실패할 경우 기존 개별 호출로 안전하게 폴백합니다.
     """
+    import config as _cfg
+
     target_candidates = [c for c in candidates if "매수" in c.get('signal', '') or "폭발" in c.get('signal', '')]
     
     if not target_candidates:
         target_candidates = candidates[:2]
-        
-    final_reports = []
+
+    enable_bulk = getattr(_cfg, "ENABLE_BULK_LLM_PROMPTING", True)
+
+    if not enable_bulk:
+        # 벌크 비활성화 시 기존 방식 유지
+        final_reports = []
+        for item in target_candidates:
+            report = generate_ai_narrative(item, leading_sectors)
+            final_reports.append(report)
+        return final_reports
+
+    # 트랙별 그룹핑
+    track_groups: dict = {}
     for item in target_candidates:
-        report = generate_ai_narrative(item, leading_sectors)
-        final_reports.append(report)
-        
+        track = item.get('track', 'Track A')
+        track_groups.setdefault(track, []).append(item)
+
+    final_reports = []
+    for track, group in track_groups.items():
+        if len(group) >= 2:
+            # 벌크 프롬프트: 동일 트랙의 복수 종목을 한 번에 분석
+            print(f"🤖 [Bulk Prompting] {track} 소속 {len(group)}개 종목 통합 분석 요청...")
+            reports = generate_bulk_ai_narrative(group, leading_sectors)
+            final_reports.extend(reports)
+        else:
+            # 단일 종목: 기존 개별 분석
+            for item in group:
+                report = generate_ai_narrative(item, leading_sectors)
+                final_reports.append(report)
+
     return final_reports
+
+
+# ── [ChatDev Bulk Prompting] 벌크 프롬프트 통합 분석 함수 ──────────────
+
+BULK_SEPARATOR = "===TICKER_SEPARATOR==="
+
+def generate_bulk_ai_narrative(candidates: list, leading_sectors=None) -> list:
+    """
+    [Bulk Prompting] 동일 트랙 종목들을 하나의 프롬프트로 묶어 LLM에 1회 요청합니다.
+    각 종목에 대한 분석을 구분자로 분리하여 출력을 요구하고,
+    응답을 파싱하여 개별 종목 리포트로 분해합니다.
+    파싱 실패 시 기존 개별 호출로 안전하게 폴백합니다.
+    """
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    track = candidates[0].get('track', 'Track A')
+    tickers = [c.get('ticker', 'UNKNOWN') for c in candidates]
+
+    # 각 종목의 핵심 데이터를 하나의 프롬프트로 병합
+    stocks_context = ""
+    for idx, c in enumerate(candidates, 1):
+        ticker = c.get('ticker', 'UNKNOWN')
+        name = c.get('name', ticker)
+        signal = c.get('signal', '관망')
+        sector = c.get('disp_sector', c.get('sector', 'Unknown'))
+        sub_sector = c.get('sub_sector', 'General')
+        pe = c.get('pe', 0.0)
+        peg = c.get('peg', 0.0)
+        vol_ratio = c.get('vol_ratio', 1.0)
+        inst_own = c.get('inst_own', 0.0)
+        close = c.get('close', 0.0)
+        beta = c.get('beta', 1.0) or 1.0
+        stop_loss_pct = round(max(5.0, min(12.0, 5.0 * beta)))
+
+        # MTF 요약
+        mtf_info = c.get('mtf_analysis')
+        entry_grade = "N/A"
+        mtf_brief = "MTF 데이터 없음"
+        if mtf_info and isinstance(mtf_info, dict):
+            entry_grade = mtf_info.get('entry_grade', 'N/A')
+            mtf_brief = mtf_info.get('summary', 'N/A')
+
+        stocks_context += f"""
+--- 종목 #{idx}: {ticker} ({name}) ---
+- 소속 섹터/테마: {sector} / {sub_sector}
+- 기술적 타점: {signal} | 파동: {c.get('stoch_summary', 'N/A')}
+- 밸류에이션: P/E {pe:.2f}, PEG {peg:.2f}
+- 거래량 배수: {vol_ratio:.2f}x | 기관 지분율: {inst_own:.1f}% | 종가: ${close:.2f}
+- MTF 등급: [{entry_grade}] ({mtf_brief})
+- Beta/손절: {beta:.2f} / -{stop_loss_pct}%
+"""
+
+    bulk_prompt = f"""[절대 준수 지침] 본 보고서의 작성 일자는 반드시 **{today_str}**로 명시하십시오.
+
+당신은 월스트리트의 상위 1% 헤지펀드 퀀트 애널리스트이자 리스크 매니저입니다.
+아래 {len(candidates)}개 종목(동일 트랙: {track})에 대해 각각 독립적인 심층 검증 리포트를 작성하십시오.
+
+[분석 대상 종목 데이터]
+{stocks_context}
+
+[작성 요구사항]
+각 종목에 대해:
+1. **투자 핵심 요약**: 가치/성장성 관점의 2문장 압축
+2. **상승 촉매제 (Catalyst)**: 섹터/테마 모멘텀 및 펀더멘털 강점
+3. **잠재적 리스크**: P/E 과열, 저거래량 위험, 기관 지분 착시 등 객관적 분석
+4. **실전 매매 전략**: 분할 진입 비중, 청산 타점, 기계적 손절선
+
+[출력 형식 - 매우 중요]
+각 종목의 리포트를 반드시 아래 구분자로 명확히 분리하십시오:
+{BULK_SEPARATOR}
+(종목 #{{}}: {{TICKER}} 리포트를 여기에 작성)
+{BULK_SEPARATOR}
+
+한국어로 전문적인 퀀트 리포트 양식에 맞춰 출력하십시오."""
+
+    print(f"🤖 [Bulk Prompting] {len(candidates)}개 종목 통합 프롬프트 Ollama 전송 중...")
+    bulk_response = call_ollama(bulk_prompt)
+
+    # 구분자 기반 응답 파싱
+    sections = bulk_response.split(BULK_SEPARATOR)
+    # 빈 섹션 및 공백만 있는 섹션 제거
+    parsed_reports = [s.strip() for s in sections if s.strip()]
+
+    if len(parsed_reports) >= len(candidates):
+        # 파싱 성공: 각 종목에 리포트 매핑
+        print(f"✅ [Bulk Prompting] 벌크 응답 파싱 성공: {len(parsed_reports)}개 리포트 분리 완료")
+        results = []
+        for idx, candidate in enumerate(candidates):
+            result = dict(candidate)
+            result['ai_briefing'] = parsed_reports[idx] if idx < len(parsed_reports) else parsed_reports[-1]
+            results.append(result)
+        return results
+    else:
+        # 파싱 실패: 기존 개별 호출로 폴백
+        print(f"⚠️ [Bulk Prompting] 벌크 응답 파싱 실패 (기대 {len(candidates)}개, 실제 {len(parsed_reports)}개). 개별 호출로 폴백...")
+        results = []
+        for item in candidates:
+            report = generate_ai_narrative(item, leading_sectors)
+            results.append(report)
+        return results
 
 
 if __name__ == "__main__":

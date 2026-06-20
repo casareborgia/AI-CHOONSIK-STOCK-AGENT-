@@ -67,9 +67,11 @@ class TestPerformance(unittest.TestCase):
         self.assertLess(parallel_time, sequential_time)
         self.assertTrue(improvement >= 50.0, f"단축률({improvement:.2f}%)이 기대치(50%)에 미달합니다.")
 
+    @patch('learning.rule_evolution.run_weekly_evolution')
+    @patch('main_orchestrator.track_outcomes')
     @patch('main_orchestrator.ReflectionEngine')
     @patch('main_orchestrator.MessageBroker')
-    def test_skip_reflection_flag(self, mock_broker, mock_reflection_engine_class):
+    def test_skip_reflection_flag(self, mock_broker, mock_reflection_engine_class, mock_track_outcomes, mock_run_weekly_evolution):
         """
         --skip-reflection 플래그에 따라 ReflectionEngine의 배치 구동이 스킵되는지 검증합니다.
         """
@@ -83,6 +85,7 @@ class TestPerformance(unittest.TestCase):
         mock_broker_inst.subscribe = AsyncMock()
         mock_broker_inst.unsubscribe = AsyncMock()
         mock_broker_inst.publish = AsyncMock()
+        mock_broker_inst.cleanup_stale_payloads = AsyncMock()
         mock_broker.return_value = mock_broker_inst
         
         # 각 에이전트 모킹 팩토리 정의
@@ -105,6 +108,7 @@ class TestPerformance(unittest.TestCase):
                  patch('main_orchestrator.TechnicalAgent', side_effect=create_mock_agent), \
                  patch('main_orchestrator.CriticAgent', side_effect=create_mock_agent), \
                  patch('main_orchestrator.DBAgent', side_effect=create_mock_agent), \
+                 patch('main_orchestrator.ThesisAgent', side_effect=create_mock_agent), \
                  patch('main_orchestrator.ReporterAgent', side_effect=create_mock_agent):
                      
                 asyncio.run(main_orchestrator.main())
@@ -122,6 +126,7 @@ class TestPerformance(unittest.TestCase):
                  patch('main_orchestrator.TechnicalAgent', side_effect=create_mock_agent), \
                  patch('main_orchestrator.CriticAgent', side_effect=create_mock_agent), \
                  patch('main_orchestrator.DBAgent', side_effect=create_mock_agent), \
+                 patch('main_orchestrator.ThesisAgent', side_effect=create_mock_agent), \
                  patch('main_orchestrator.ReporterAgent', side_effect=create_mock_agent):
                      
                 asyncio.run(main_orchestrator.main())

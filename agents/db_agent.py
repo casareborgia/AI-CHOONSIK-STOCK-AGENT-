@@ -93,8 +93,25 @@ class DBAgent(BaseAgent):
                     round(_time.time() - _t0, 2),
                 )
 
-                # 저장 완료 알림 발행 (기존 메시지를 다음 ReporterAgent가 이어서 쓸 수 있도록 전달)
-                await self.publish("db/saved", message)
+                # [Memory Diet] ReporterAgent에 필요한 핵심 요약만 전달
+                REPORTER_FORWARD_KEYS = [
+                    'ticker', 'name', 'signal', 'close', 'disp_sector',
+                    'sub_sector', 'sub_sector_desc', 'ai_briefing',
+                    'violations', 'auto_fixed', 'track', 'vol_ratio',
+                    'pe', 'peg', 'ev_ebitda', 'inst_own', 'high_52w',
+                    'stoch_summary'
+                ]
+                slim_results = self.slim_candidates(
+                    message.get("ai_verified_results", []),
+                    REPORTER_FORWARD_KEYS
+                )
+                self.logger.info(f"[Memory Diet] ReporterAgent 전달용 슬림화 완료: {len(slim_results)}종목")
+                slim_msg = {
+                    "ai_verified_results": slim_results,
+                    "leading_names": message.get("leading_names", []),
+                    "sub_theme_results": message.get("sub_theme_results", {})
+                }
+                await self.publish("db/saved", slim_msg)
 
             except Exception as e:
                 self.logger.error(f"Error in DBAgent process: {e}", exc_info=True)

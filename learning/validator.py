@@ -190,37 +190,59 @@ def validate_report(report_data: dict) -> list[dict]:
 
 def auto_fix_report(original_report: str, violations: list[dict]) -> str:
     """
-    규칙 위반 내용을 젬마4(Gemma-2) 모델에 송신하여, 문맥의 왜곡 없이 리포트를 전문적으로 재수정합니다.
+    [Communicative Dehallucination]
+    규칙 위반 내용을 구조화된 JSON 교정 지시서와 함께 LLM에게 전달하여,
+    환각 없이 팩트 기반으로만 리포트를 정밀 교정합니다.
+
+    ChatDev의 '역할 반전(Role Reversal)' 원칙에 따라, LLM이 교정 작업 완료 후
+    스스로 자가 검증 체크리스트를 수행하도록 유도합니다.
     """
+    import json as _json
+
     critical = [v for v in violations if v["severity"] == "critical"]
     warnings = [v for v in violations if v["severity"] == "warning"]
     
     if not critical and not warnings:
         return original_report
-        
-    critical_text = "\n".join([f"- [{v['rule_id']}] {v['description']}" for v in critical]) if critical else "없음"
-    warning_text = "\n".join([f"- [{v['rule_id']}] {v['description']}" for v in warnings]) if warnings else "없음"
-    
-    # 교정 극대화 프롬프트
-    fix_prompt = f"""[명령서: 투자 보고서 퀄리티 정밀 교정 지침]
+
+    # [구조화된 교정 스키마] JSON 형태로 위반 정보를 명확히 전달
+    fix_schema = {
+        "critical_violations": [
+            {"rule_id": v["rule_id"], "rule_name": v["rule_name"], "description": v["description"]}
+            for v in critical
+        ],
+        "warning_violations": [
+            {"rule_id": v["rule_id"], "rule_name": v["rule_name"], "description": v["description"]}
+            for v in warnings
+        ]
+    }
+    schema_json = _json.dumps(fix_schema, ensure_ascii=False, indent=2)
+
+    # 교정 극대화 프롬프트 (구조화 스키마 + 역할 반전 자가 검증)
+    fix_prompt = f"""[명령서: 투자 보고서 퀄리티 정밀 교정 지침 (구조화 스키마)]
 당신은 세계적인 헤지펀드의 컴플라이언스 및 리스크 총괄 위원입니다.
-AI가 작성한 원문 보고서에서 투자자에게 치명적인 손실을 안길 수 있는 정량적 사실 왜곡 및 리스크 누락 규칙 위반이 감지되었습니다. 
+AI가 작성한 원문 보고서에서 투자자에게 치명적인 손실을 안길 수 있는 정량적 사실 왜곡 및 리스크 누락 규칙 위반이 감지되었습니다.
 
-지침에 따라 보고서를 정밀하게 교정(Revision)하십시오.
-
-## [검증 위반 감지 내역]
-1. 치명적 위반 (반드시 보고서 수정 반영):
-{critical_text}
-
-2. 경고 및 주의 추가 권고 (보고서에 관련 단락/문구 삽입):
-{warning_text}
+## [교정 지시 스키마 (JSON)]
+아래 JSON의 각 항목에 대해 정확히 대응하는 교정을 수행하십시오.
+임의의 수치나 팩트를 새로 창작하지 말고, 오직 description에 명시된 사실만을 반영하십시오.
+```json
+{schema_json}
+```
 
 ## [절대 준수 교정 규칙]
 1. 원문 보고서의 전문적인 마크다운 포맷과 핵심 골격을 **100% 보존**하십시오.
-2. 치명적 위반(Critical)은 감지된 사실 데이터(P/E, 수급 등)를 기반으로 해당 논평 섹션의 가치관이나 해석을 객관적 리스크 중심으로 직접 재수정하십시오.
-3. 경고 및 주의 권고(Warning)는 해당 종목의 리스크 섹션(또는 마지막 부분)에 구체적인 문장으로 균형 잡힌 시각을 추가하십시오.
+2. 치명적 위반(critical_violations)은 감지된 사실 데이터(P/E, 수급 등)를 기반으로 해당 논평 섹션의 가치관이나 해석을 객관적 리스크 중심으로 직접 재수정하십시오.
+3. 경고 및 주의 권고(warning_violations)는 해당 종목의 리스크 섹션(또는 마지막 부분)에 구체적인 문장으로 균형 잡힌 시각을 추가하십시오.
 4. 새로운 할루시네이션(과거 날짜, 존재하지 않는 수급 재료 등)을 절대로 창작하여 끼워넣지 마십시오. 오로지 주어지고 검증된 사실 왜곡의 정밀 교정만을 목표로 합니다.
 5. 보고서 원본 내용은 수정된 문장을 제외하고는 한 글자도 바꾸지 마십시오.
+
+## [역할 반전 자가 검증 (Role Reversal Self-Check)]
+교정 작업을 마친 후, 반드시 아래 자가 검증 체크리스트를 스스로 수행하십시오:
+1. 원본 보고서의 마크다운 구조가 100% 보존되었는가?
+2. 새로운 날짜, 수치, 이벤트 등을 창작하여 삽입하지 않았는가?
+3. 각 critical 위반에 대해 구체적인 경고 문구가 보고서 본문에 삽입되었는가?
+4. 각 warning 위반에 대해 리스크 섹션에 보수적 관점의 추가 문장이 있는가?
 
 ## [교정 대상 원문 투자 리포트]
 {original_report}
@@ -229,6 +251,7 @@ AI가 작성한 원문 보고서에서 투자자에게 치명적인 손실을 �
 수정 및 보정이 끝난 마크다운 보고서 전문만을 출력하십시오:"""
     
     print("   🛡️ [validator.py] 규칙 위반 발생에 따른 Gemma-2 정밀 보정 기동...")
+    print(f"   📋 [Dehallucination] 구조화 교정 스키마 적용: critical {len(critical)}건, warning {len(warnings)}건")
     revised_report = call_ollama(fix_prompt, model_type="light")
     
     # 젬마의 응답에 에러나 통신 실패가 있으면 안전하게 원본을 반환
@@ -237,3 +260,4 @@ AI가 작성한 원문 보고서에서 투자자에게 치명적인 손실을 �
         return original_report
         
     return revised_report
+

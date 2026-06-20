@@ -158,7 +158,19 @@ class CriticAgent(BaseAgent):
                     "stoch_summary": "N/A"
                 }
 
-            # 3. 비판 보고서 작성 (LLM 호출)
+            # ── [ChatDev Conditional Pass] 1차 평가와 기술 지표 간 모순 사전 검증 ──
+            import config as _cfg
+            enable_early_pass = getattr(_cfg, "ENABLE_DEBATE_EARLY_PASS", True)
+            if enable_early_pass and self._is_debate_concordant(initial_eval, tech_info):
+                self.logger.info(f"✅ [{ticker}] [Conditional Pass] 1차 평가와 기술 지표가 일치합니다. 디베이트 조기 종료.")
+                payload_data["criticism"] = "특이 모순 발견되지 않음 (정량 사전 검증 패스)"
+                await self.broker.put_payload(f"debate:{ticker}", payload_data)
+                debate_response = {"ticker": ticker, "payload_tag": payload_tag, "turn": 2}
+                await self.publish("critic/debate_response", debate_response)
+                return
+
+            # 3. 비판 보고서 작성 (LLM 호출) - 모순이 감지된 경우에만 도달
+            self.logger.info(f"⚠️ [{ticker}] 1차 평가와 기술 지표 간 모순 감지. LLM 비판 보고서 생성 중...")
             criticism_text = await asyncio.to_thread(
                 generate_criticism, ticker, initial_eval, tech_info
             )
@@ -178,3 +190,29 @@ class CriticAgent(BaseAgent):
 
         except Exception as e:
             self.logger.error(f"디베이트 검증 처리 중 오류 발생: {e}", exc_info=True)
+
+    def _is_debate_concordant(self, initial_eval: str, tech_info: dict) -> bool:
+        """
+        [ChatDev Dual-Agent Shortcut]
+        1차 평가와 기술 지표가 동일한 방향(Bullish/Bearish/Neutral)을 가리키는지 판단합니다.
+        모순이 없으면 True를 반환하여 LLM 비판 생성을 생략합니다.
+        """
+        eval_lower = (initial_eval or "").lower()
+        signal = (tech_info.get("signal", "") or "").lower()
+        regime = (tech_info.get("regime", "") or "").lower()
+
+        # Bullish 평가 + 정배열/수렴 + 매수 시그널 → 모순 없음
+        if "bullish" in eval_lower and regime in ("aligned", "converged") and "매수" in signal:
+            return True
+        # Neutral 평가 + 관망 시그널 → 모순 없음
+        if "neutral" in eval_lower and "관망" in signal:
+            return True
+        # Bearish 평가 + 역배열/하락 시그널 → 모순 없음
+        if "bearish" in eval_lower and regime == "reversed":
+            return True
+        # 변화 없음(중립) 평가 + 혼조 시그널 → 모순 없음
+        if "중요한 변화 없음" in eval_lower and regime in ("mixed", "converged"):
+            return True
+        # 그 외 → 모순 가능성 있으므로 LLM 비판 수행
+        return False
+

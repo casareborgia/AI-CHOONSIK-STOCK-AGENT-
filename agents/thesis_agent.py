@@ -138,10 +138,17 @@ class ThesisAgent(BaseAgent):
             initial_eval = payload_data["initial_evaluation"]
             criticism = payload_data.get("criticism", "특이 모순 발견되지 않음")
 
-            # 최종 합의 연산 (LLM 호출)
-            reconciled_text = await asyncio.to_thread(
-                reconcile_thesis_debate, ticker, initial_eval, criticism
-            )
+            # ── [ChatDev Conditional Pass] CriticAgent 조기 패스 감지 ──
+            is_neutral_pass = "특이 모순 발견되지 않음" in criticism
+            if is_neutral_pass:
+                self.logger.info(f"✅ [{ticker}] [Conditional Pass] CriticAgent 조기 패스 확인. LLM 합의 과정 생략.")
+                reconciled_text = initial_eval  # 1차 평가를 최종 결과로 사용
+            else:
+                # 최종 합의 연산 (LLM 호출) - 모순이 감지된 경우에만 실행
+                self.logger.info(f"⚠️ [{ticker}] 모순 감지됨. LLM 합의 리포트 생성 중...")
+                reconciled_text = await asyncio.to_thread(
+                    reconcile_thesis_debate, ticker, initial_eval, criticism
+                )
 
             # 결과 업데이트 및 공유 메모리 갱신
             payload_data["final_reconciliation"] = reconciled_text
