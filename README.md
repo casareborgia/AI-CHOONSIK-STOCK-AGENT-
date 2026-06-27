@@ -50,7 +50,7 @@ graph TD
 
 
 ### 📡 1. 토스증권 API 실시간 시세 연동 및 yfinance 이중화 폴백 (Toss Securities API Integration)
-*   **실시간 수급 정보**: `.env`에 정의된 `TOSS_CLIENT_ID` 및 `TOSS_CLIENT_SECRET`를 참조하여 실시간으로 OAuth2 토큰을 발급/갱신하고 시세를 조회하는 [toss_client.py](file:///Users/leeseungjun/coding/%ED%88%AC%EC%9E%90%20%EC%9D%98%EC%82%AC%EA%B2%B0%EA%B2%B0%EC%A0%95%20%EB%B3%B4%EC%A1%B0%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%B6%98%EC%8B%9D%20MK3/core/toss_client.py)를 신설했습니다.
+*   **실시간 수급 정보**: `.env`에 정의된 `TOSS_CLIENT_ID` 및 `TOSS_CLIENT_SECRET`를 참조하여 실시간으로 OAuth2 토큰을 발급/갱신하고 시세를 조회하는 [toss_client.py](core/toss_client.py)를 신설했습니다.
 *   **하이브리드 시세 수집**: 국내 서학개미들의 실시간 투자 동향을 분석하기 위해 토스증권 시세를 우선적으로 참조하며, API 차단이나 네트워크 예외 발생 시 기존의 `yfinance` 모듈로 유연하게 전환(Fallback)되는 안전 설계를 갖추고 있습니다.
 
 ### 2. 🤖 듀얼 LLM 협동 아키텍처 (Dual-LLM Architecture)
