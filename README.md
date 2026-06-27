@@ -85,6 +85,12 @@ graph TD
 *   **유동성 및 수렴 분석**: 스토캐스틱 파동 외에도 60일, 120일선 등 장기 이동평균선 정배열/역배열을 판별하고 편차를 분석하여, 에너지가 응축된 수렴 구간과 이격 과열 구간을 감지합니다.
 *   **리스크 프로파일 연동**: `config.py`의 `USER_RISK_PROFILE` 설정(보수/균형/공격)에 부합하도록 밸류에이션(P/E, PEG) 가드레일을 통제하여 투자 안정성을 높였습니다.
 
+### 🔗 6. LangSmith 관측성(Observability) 및 디버깅 체인 연동
+*   **최소 침습 경량화 설계**: 에이전트 동작 및 리소스 병목을 방지하기 위해 LangChain/LangGraph 등 복잡한 프레임워크를 전면 배제하고, 순수 `langsmith` SDK의 `@traceable` 데코레이터만을 사용해 경량화 연동을 완수했습니다.
+*   **초절약 A 방식 계측 설계**: 전체 배치 실행 1회를 단일 루트 트레이스(`chunsik_pipeline_run`)로 묶고 그 아래에 비동기 에이전트 간 디베이트, 검증, 성찰 및 최종 LLM 호출(`call_ollama`)들을 자식 span 트리 형태로 중첩시켜 트레이스 소비량을 극적으로 억제했습니다. (월 60건 내외 소비로 무료 등급 한도 준수)
+*   **챗봇 명령어 개별 루트 분리**: `/add` 및 `/check` 명령어 처리 부분을 독립된 `@traceable` 헬퍼 메소드로 분리하여 챗봇 실행 1회당 1건의 루트 트레이스(`chatbot_add`, `chatbot_check`)를 생성하도록 구조적으로 정비했습니다.
+*   **환경 변수 안전 오버라이드 차단망**: `.env`에 `LANGSMITH_API_KEY`가 없거나 Tracing 활성 플래그가 꺼진 경우, 런타임에 트레이싱을 강제 비활성화하여 외부 전송 시도가 원천 차단되도록 방어했습니다. API 키가 잘못되었거나 도달할 수 없는 네트워크 단절 상황에서도 춘식이의 본 연산(Ollama 추론 및 리포트 작성)이 지연되거나 멈추지 않는 베스트에포트 설계를 검증했습니다.
+
 ---
 
 ## 🛠 Installation & Setup
@@ -107,7 +113,13 @@ pip install -r requirements.txt
 # 프로젝트 루트에 .env 파일을 생성하고 아래 형식으로 채워 넣습니다.
 TELEGRAM_BOT_TOKEN="여기에 텔레그램 봇 토큰 입력"
 TELEGRAM_CHAT_ID="여기에 수신할 챗 ID 입력"
-FMP_API_KEY="선택 사항: FMP API 키 (없을 경우 Dataroma로 자동 폴백)"
+TOSS_CLIENT_ID="선택 사항: 토스증권 API 클라이언트 ID"
+TOSS_CLIENT_SECRET="선택 사항: 토스증권 API 클라이언트 시크릿"
+
+# LangSmith 설정 (선택 사항)
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY="발급받은 랭스미스 API 키"
+LANGSMITH_PROJECT="chunsik-mk4"
 ```
 
 ### Usage
