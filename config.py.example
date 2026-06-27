@@ -343,6 +343,23 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# LangSmith 관측성 설정 (옵션)
+# API 키가 비어 있거나 LANGSMITH_TRACING이 false이면 비활성화
+LANGSMITH_TRACING_ENV = os.getenv("LANGSMITH_TRACING", "false").lower() == "true"
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
+LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "chunsik-mk4")
+
+if LANGSMITH_TRACING_ENV and LANGSMITH_API_KEY:
+    LANGSMITH_TRACING = True
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGSMITH_API_KEY"] = LANGSMITH_API_KEY
+    os.environ["LANGSMITH_PROJECT"] = LANGSMITH_PROJECT
+else:
+    LANGSMITH_TRACING = False
+    os.environ["LANGSMITH_TRACING"] = "false"
+    if "LANGSMITH_API_KEY" in os.environ:
+        del os.environ["LANGSMITH_API_KEY"]
+
 # ------------------------------------------------------------------------------
 # 6. 리스크 관리 설정 (Risk Management & Guardrails)
 # ------------------------------------------------------------------------------

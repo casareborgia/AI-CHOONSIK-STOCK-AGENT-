@@ -11,6 +11,7 @@
 import sys
 import os
 from datetime import datetime
+from langsmith import traceable
 
 # 부모 디렉토리 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -284,6 +285,7 @@ def generate_ai_narrative(candidate, leading_sectors=None):
     return result
 
 
+@traceable(run_type="chain", name="run_ai_verification")
 def run_ai_verification(candidates, leading_sectors=None):
     """
     [Bulk Prompting] 시그널이 포착된 후보군 전체를 대상으로 AI 브리핑 리스트를 생성합니다.

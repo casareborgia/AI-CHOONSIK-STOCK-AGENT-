@@ -12,6 +12,7 @@ import urllib.request
 import urllib.parse
 
 import config
+from langsmith import traceable, get_current_run_tree
 
 
 def validate_url(url: str) -> bool:
@@ -50,6 +51,7 @@ def clean_untrusted_text(text: str) -> str:
     return s
 
 
+@traceable(run_type="llm", name="call_ollama")
 def call_ollama(prompt: str, model_type: str = "heavy", timeout: int = 60, max_retries: int = 3) -> str:
     """
     로컬 Ollama 서버와 통신하여 전체(non-stream) 텍스트 응답을 반환합니다.
@@ -60,6 +62,11 @@ def call_ollama(prompt: str, model_type: str = "heavy", timeout: int = 60, max_r
     if not validate_url(url):
         raise ValueError(f"Blocked unsafe or disallowed URL (SSRF Prevention): {url}")
     target_model = config.HEAVY_LLM_MODEL if model_type == "heavy" else config.LIGHT_LLM_MODEL
+    
+    run_tree = get_current_run_tree()
+    if run_tree:
+        run_tree.metadata["target_model"] = target_model
+        run_tree.metadata["model_type"] = model_type
     payload = {
         "model": target_model,
         "prompt": prompt,

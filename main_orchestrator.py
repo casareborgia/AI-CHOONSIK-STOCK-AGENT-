@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta
 
 import config
+from langsmith import traceable
 
 from message_bus.broker import MessageBroker
 from agents.market_agent import MarketAgent
@@ -33,6 +34,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("Orchestrator")
 
+@traceable(name="chunsik_pipeline_run")
 async def main():
     start_time = time.time()
     logger.info("================================================================================")

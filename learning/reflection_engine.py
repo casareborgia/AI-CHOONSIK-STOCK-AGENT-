@@ -9,6 +9,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import asyncio
 import logging
+from langsmith import traceable
 
 from learning.db import get_connection
 from core.ai_verify import call_ollama
@@ -54,6 +55,7 @@ class ReflectionEngine:
         finally:
             conn.close()
 
+    @traceable(run_type="chain", name="process_single_reflection")
     async def process_single_reflection(self, r_id, r_date_str, ticker, entry_price, revised_text, report_text):
         """개별 종목의 성찰을 처리하는 단일 비동기 태스크"""
         logger.info(f"Processing outcome reflection for {ticker} (Report ID: {r_id}, Date: {r_date_str})")

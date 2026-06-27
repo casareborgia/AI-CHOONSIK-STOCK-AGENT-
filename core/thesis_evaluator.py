@@ -1,6 +1,7 @@
 import sys
 import os
 from datetime import datetime
+from langsmith import traceable
 
 # 프로젝트 루트 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -121,6 +122,7 @@ def generate_initial_thesis_map(ticker: str, name: str, info: dict) -> dict:
         
     return data
 
+@traceable(run_type="chain", name="evaluate_thesis_change")
 def evaluate_thesis_change(ticker: str, thesis_map: dict, news_list: list) -> dict:
     """
     기존 Thesis Map과 최신 뉴스들을 입력받아 Thesis 변화를 심층 평가합니다.
@@ -206,6 +208,7 @@ def evaluate_thesis_change(ticker: str, thesis_map: dict, news_list: list) -> di
     }
 
 
+@traceable(run_type="chain", name="generate_criticism")
 def generate_criticism(ticker: str, initial_evaluation: str, tech_info: dict) -> str:
     """
     [CriticAgent 전용] 1차 투자 Thesis 평가 결과와 기술적 지표 분석을 교차 검증하여 비판적 피드백을 작성합니다.
@@ -236,6 +239,7 @@ def generate_criticism(ticker: str, initial_evaluation: str, tech_info: dict) ->
     return ai_response
 
 
+@traceable(run_type="chain", name="reconcile_thesis_debate")
 def reconcile_thesis_debate(ticker: str, initial_evaluation: str, criticism: str) -> str:
     """
     [ThesisAgent 전용] CriticAgent의 반론 및 리스크 지적을 수용하고 성찰하여 최종 종합 합의안을 작성합니다.

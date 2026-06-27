@@ -10,6 +10,7 @@ import yfinance as yf
 # 프로젝트 루트 디렉토리 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from langsmith import traceable
 from agents.base import BaseAgent
 from learning.db import add_or_update_thesis, get_thesis_map, get_all_thesis_maps, delete_thesis_map, get_pending_rules, approve_rule, reject_rule
 from core.thesis_evaluator import generate_initial_thesis_map, evaluate_thesis_change
@@ -130,6 +131,67 @@ class TelegramAgent(BaseAgent):
                 
             await asyncio.sleep(2)
 
+    @traceable(name="chatbot_add")
+    async def _handle_add_command(self, ticker: str):
+        await self.send_response(f"🤖 [{ticker}] 기업 정보를 분석하여 최초 Thesis Map 초안을 빌드하고 있습니다. 잠시만 기다려주세요...")
+        try:
+            def get_yf_info(t):
+                tick = yf.Ticker(t)
+                return tick.info, tick.info.get("longName", t)
+            
+            info, company_name = await asyncio.to_thread(get_yf_info, ticker)
+            thesis_data = await asyncio.to_thread(generate_initial_thesis_map, ticker, company_name, info)
+            if thesis_data is None:
+                await self.send_response(f"❌ [{ticker}] 로컬 AI 연동 지연으로 최초 Thesis Map 생성이 불가합니다.")
+                return
+            success = add_or_update_thesis(ticker, company_name, thesis_data)
+            
+            if success:
+                res_text = f"✨ *[{ticker} / {escape_markdown(company_name)}] Thesis Map 빌드 및 감시 등록 완료!*\n\n"
+                res_text += f"▪️ *투자 thesis*: {escape_markdown(thesis_data['investment_thesis'])}\n"
+                res_text += f"▪️ *핵심 지표*: {escape_markdown(thesis_data['key_indicators'])}\n"
+                res_text += f"▪️ *주요 촉매*: {escape_markdown(thesis_data['catalysts'])}\n"
+                res_text += f"▪️ *주요 리스크*: {escape_markdown(thesis_data['risks'])}\n"
+                res_text += f"▪️ *kill condition*: {escape_markdown(thesis_data['kill_condition'])}\n"
+                res_text += f"▪️ *무시해도 되는 잡뉴스*: {escape_markdown(thesis_data['noise_rules'])}\n"
+                res_text += f"▪️ *실적 체크포인트*: {escape_markdown(thesis_data['earnings_checkpoints'])}\n"
+                res_text += f"▪️ *valuation 기준*: {escape_markdown(thesis_data['valuation_criteria'])}\n"
+                res_text += f"▪️ *한 줄 결론*: {escape_markdown(thesis_data['one_line_conclusion'])}"
+                await self.send_response(res_text)
+            else:
+                await self.send_response(f"❌ [{ticker}] DB 저장에 실패했습니다.")
+        except Exception as e:
+            self.logger.error(f"add 명령어 수행 에러: {e}", exc_info=True)
+            await self.send_response(f"❌ [{ticker}] Thesis Map 생성 중 내부 오류가 발생했습니다. 로그를 확인해주세요.")
+
+    @traceable(name="chatbot_check")
+    async def _handle_check_command(self, ticker: str):
+        await self.send_response(f"🔍 [{ticker}]의 최근 뉴스/공시 및 기존 Thesis Map 비교 분석을 즉시 가동합니다...")
+        try:
+            thesis_map = get_thesis_map(ticker)
+            if not thesis_map:
+                await self.send_response(f"⚠️ [{ticker}]는 감시 목록에 등록되어 있지 않습니다. `/add {ticker}`를 먼저 실행해주세요.")
+                return
+                
+            news_list = fetch_recent_news(ticker, hours=24)
+            if not news_list:
+                news_list = fetch_recent_news(ticker, hours=168)
+                if not news_list:
+                    await self.send_response(f"📭 [{ticker}] 최근 7일 내에 수집된 새로운 뉴스가 없습니다.")
+                    return
+                else:
+                    await self.send_response(f"💡 최근 24시간 내 뉴스가 없어 최근 7일 내의 뉴스를 토대로 분석합니다. (수집 뉴스: {len(news_list)}개)")
+            
+            eval_res = await asyncio.to_thread(evaluate_thesis_change, ticker, thesis_map, news_list)
+            
+            if eval_res.get("has_change"):
+                await self.send_response(f"🚨 *[{ticker}] Thesis 변화 감시 브리핑*\n\n{eval_res['evaluation_text']}")
+            else:
+                await self.send_response(f"✅ *[{ticker}] 분석 결과*: 기존 투자 Thesis에 영향을 미칠 만한 유의미한 변화가 발견되지 않았습니다.")
+        except Exception as e:
+            self.logger.error(f"check 명령어 수행 에러: {e}", exc_info=True)
+            await self.send_response(f"❌ [{ticker}] 검사 수행 중 내부 오류가 발생했습니다. 로그를 확인해주세요.")
+
     async def process_command(self, text: str):
         """명령어 파싱 및 처리"""
         self.logger.info(f"수신된 명령어: {text}")
@@ -172,37 +234,7 @@ class TelegramAgent(BaseAgent):
             if not is_valid_ticker(ticker):
                 await self.send_response("⚠️ 유효하지 않은 티커 형식입니다. 영문 1~5자리로 입력해주세요. (예: AAPL)")
                 return
-            await self.send_response(f"🤖 [{ticker}] 기업 정보를 분석하여 최초 Thesis Map 초안을 빌드하고 있습니다. 잠시만 기다려주세요...")
-            
-            try:
-                def get_yf_info(t):
-                    tick = yf.Ticker(t)
-                    return tick.info, tick.info.get("longName", t)
-                
-                info, company_name = await asyncio.to_thread(get_yf_info, ticker)
-                thesis_data = await asyncio.to_thread(generate_initial_thesis_map, ticker, company_name, info)
-                if thesis_data is None:
-                    await self.send_response(f"❌ [{ticker}] 로컬 AI 연동 지연으로 최초 Thesis Map 생성이 불가합니다.")
-                    return
-                success = add_or_update_thesis(ticker, company_name, thesis_data)
-                
-                if success:
-                    res_text = f"✨ *[{ticker} / {escape_markdown(company_name)}] Thesis Map 빌드 및 감시 등록 완료!*\n\n"
-                    res_text += f"▪️ *투자 thesis*: {escape_markdown(thesis_data['investment_thesis'])}\n"
-                    res_text += f"▪️ *핵심 지표*: {escape_markdown(thesis_data['key_indicators'])}\n"
-                    res_text += f"▪️ *주요 촉매*: {escape_markdown(thesis_data['catalysts'])}\n"
-                    res_text += f"▪️ *주요 리스크*: {escape_markdown(thesis_data['risks'])}\n"
-                    res_text += f"▪️ *kill condition*: {escape_markdown(thesis_data['kill_condition'])}\n"
-                    res_text += f"▪️ *무시해도 되는 잡뉴스*: {escape_markdown(thesis_data['noise_rules'])}\n"
-                    res_text += f"▪️ *실적 체크포인트*: {escape_markdown(thesis_data['earnings_checkpoints'])}\n"
-                    res_text += f"▪️ *valuation 기준*: {escape_markdown(thesis_data['valuation_criteria'])}\n"
-                    res_text += f"▪️ *한 줄 결론*: {escape_markdown(thesis_data['one_line_conclusion'])}"
-                    await self.send_response(res_text)
-                else:
-                    await self.send_response(f"❌ [{ticker}] DB 저장에 실패했습니다.")
-            except Exception as e:
-                self.logger.error(f"add 명령어 수행 에러: {e}", exc_info=True)
-                await self.send_response(f"❌ [{ticker}] Thesis Map 생성 중 내부 오류가 발생했습니다. 로그를 확인해주세요.")
+            await self._handle_add_command(ticker)
                 
         elif text.startswith("/save"):
             body = text[5:].strip()
@@ -285,32 +317,7 @@ class TelegramAgent(BaseAgent):
             if not is_valid_ticker(ticker):
                 await self.send_response("⚠️ 유효하지 않은 티커 형식입니다. 영문 1~5자리로 입력해주세요. (예: AAPL)")
                 return
-            await self.send_response(f"🔍 [{ticker}]의 최근 뉴스/공시 및 기존 Thesis Map 비교 분석을 즉시 가동합니다...")
-            
-            try:
-                thesis_map = get_thesis_map(ticker)
-                if not thesis_map:
-                    await self.send_response(f"⚠️ [{ticker}]는 감시 목록에 등록되어 있지 않습니다. `/add {ticker}`를 먼저 실행해주세요.")
-                    return
-                    
-                news_list = fetch_recent_news(ticker, hours=24)
-                if not news_list:
-                    news_list = fetch_recent_news(ticker, hours=168)
-                    if not news_list:
-                        await self.send_response(f"📭 [{ticker}] 최근 7일 내에 수집된 새로운 뉴스가 없습니다.")
-                        return
-                    else:
-                        await self.send_response(f"💡 최근 24시간 내 뉴스가 없어 최근 7일 내의 뉴스를 토대로 분석합니다. (수집 뉴스: {len(news_list)}개)")
-                
-                eval_res = await asyncio.to_thread(evaluate_thesis_change, ticker, thesis_map, news_list)
-                
-                if eval_res.get("has_change"):
-                    await self.send_response(f"🚨 *[{ticker}] Thesis 변화 감시 브리핑*\n\n{eval_res['evaluation_text']}")
-                else:
-                    await self.send_response(f"✅ *[{ticker}] 분석 결과*: 기존 투자 Thesis에 영향을 미칠 만한 유의미한 변화가 발견되지 않았습니다.")
-            except Exception as e:
-                self.logger.error(f"check 명령어 수행 에러: {e}", exc_info=True)
-                await self.send_response(f"❌ [{ticker}] 검사 수행 중 내부 오류가 발생했습니다. 로그를 확인해주세요.")
+            await self._handle_check_command(ticker)
 
         elif text.startswith("/rules"):
             try:

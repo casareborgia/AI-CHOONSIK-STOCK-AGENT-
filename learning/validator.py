@@ -8,6 +8,7 @@ import sqlite3
 import re
 import os
 import sys
+from langsmith import traceable
 
 # 프로젝트 루트 디렉토리 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -188,6 +189,7 @@ def validate_report(report_data: dict) -> list[dict]:
         
     return violations
 
+@traceable(run_type="chain", name="auto_fix_report")
 def auto_fix_report(original_report: str, violations: list[dict]) -> str:
     """
     [Communicative Dehallucination]
